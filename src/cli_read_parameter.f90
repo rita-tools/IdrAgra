@@ -163,6 +163,15 @@ subroutine read_sim_parameters(file_xml, xml, reckless)
                         read(buffer, *, iostat=ios) xml%sim%mode
                     case ('initialthetaflag') ! T: read init moisture from external file
                         read(buffer, *, iostat=ios) xml%sim%f_init_wc
+                        if (xml%sim%f_init_wc) then
+                            print *, "Warning: since the removal of cropcoef (IdrAgra 3.0.0 onwards), it is recommended to set InitialThetaFlag = F."
+                            print *, "Because you have set it to 'T' instead, note that crop state in the first simulation year might not be &
+                                    & representative of actual field conditions (crops can't be sown before the simulation starts)"
+                            if (.not. reckless) then
+                                print *, "press <enter> to continue "
+                                read *
+                            end if
+                        end if
                     case ('finalthetaflag') ! T: if final soil moisture condition is written on files, F if not
                         read(buffer, *, iostat=ios) xml%sim%f_theta_out
                     case ('startsimulation')    ! date of start simulation
