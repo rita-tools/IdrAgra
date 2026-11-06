@@ -47,9 +47,9 @@ RELDIR = release
 # Check the list sequence according to compile order
 # interf_bilancio 
 
-FILES = mod_constants mod_utility mod_parameters mod_grid mod_common mod_evapotranspiration mod_meteo \
-		mod_crop_phenology mod_crop_soil_water mod_runoff mod_TDx_index mod_irrigation mod_system \
-		mod_coupling cli_watsources cli_crop_parameters cli_save_outputs cli_read_parameter cli_simulation_manager
+FILES = mod_constants mod_date mod_utility mod_parameters mod_grid mod_common mod_evapotranspiration mod_meteo \
+		mod_crop_phenology mod_cropcoef mod_crop_soil_water mod_runoff mod_irrigation mod_system \
+		mod_coupling cli_watsources cli_crop_parameters mod_crop_yield cli_save_outputs cli_read_parameter cli_simulation_manager
 
 #### User, don't touch the following line ####
 

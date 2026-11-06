@@ -1,5 +1,5 @@
 module mod_evapotranspiration
-use mod_constants, only: sp, dp, pi
+use mod_constants, only: dp, pi
 implicit none
 
 

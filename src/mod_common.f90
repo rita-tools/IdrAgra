@@ -5,59 +5,34 @@ use mod_constants, only: dp
 use mod_grid
 implicit none
 
-! TODO: merge the two types in only one
-type balance1_matrices
-! Definition of type balance1_matrices
-! Stores in distributed form all 1st layer (evaporative layer) balance terms
-! The variable is modified each day
-    real(dp),dimension(:,:),pointer::d_e               ! depth of the evaporative layer  [m]
-    real(dp),dimension(:,:),pointer::h_eva            ! actual evaporation [mm]
-    real(dp),dimension(:,:),pointer::h_eva_pot        ! potential evaporation [mm]
-    real(dp),dimension(:,:),pointer::h_transp_act     ! actual transpiration [mm]
-    real(dp),dimension(:,:),pointer::h_transp_pot     ! potential transpiration [mm]
-    real(dp),dimension(:,:),pointer::h_soil           ! water content [mm]
-    real(dp),dimension(:,:),pointer::t_soil           ! volumetric water content [m3/m3]
-    real(dp),dimension(:,:),pointer::h_interc         ! interception [mm]
-    real(dp),dimension(:,:),pointer::h_perc           ! percolation from 1st to 2nd layer [mm]
-    real(dp),dimension(:,:),pointer::h_pond           ! excessive surface ponding [m]
-    real(dp),dimension(:,:),pointer::h_inf            ! infiltration [mm]
-    real(dp),dimension(:,:),pointer::k_s_dry          ! water scarcity stress coefficient [-]
-    real(dp),dimension(:,:),pointer::k_s_sat          ! water saturation stress coefficient [-]
-    real(dp),dimension(:,:),pointer::k_s              ! water stress coefficient [-]
-    real(dp),dimension(:,:),pointer::h_runoff         ! runoff [mm]
-    real(dp),dimension(:,:),pointer::h_eff_rain       ! effective rainfall [mm]
-    real(dp),dimension(:,:),pointer::h_net_av_water   ! net available water = effective rainfall + sprinkle irrigation (over which runoff is calculated)
-    real(dp),dimension(:,:),pointer::h_gross_av_water ! gross available water = effective rainfall + sprinkle irrigation
-end type balance1_matrices
+type layer_balance_matrices
+    real(dp) ,dimension(:,:), allocatable :: thickness      ! layer thickness [m]
+    real(dp) ,dimension(:,:), allocatable :: h_soil         ! water storage [mm]
+    real(dp) ,dimension(:,:), allocatable :: t_soil         ! volumetric water content [m3/m3]
+    real(dp) ,dimension(:,:), allocatable :: h_transp_act   ! actual transpiration [mm]
+    real(dp) ,dimension(:,:), allocatable :: h_transp_pot   ! potential transpiration [mm]
+    real(dp) ,dimension(:,:), allocatable :: h_perc         ! percolation leaving the layer [mm]
+end type layer_balance_matrices
 
-type balance2_matrices
-! Definition of type balance2_matrices
-! Stores in distributed form all 2nd layer (transpirative layer) balance terms
-! The variable is modified each day
-    real(dp),dimension(:,:),pointer::d_t            ! thickness of the transpirative layer  [m]
-    real(dp),dimension(:,:),pointer::h_soil         ! water content [mm]
-    real(dp),dimension(:,:),pointer::t_soil         ! volumetric water content of the evaporative layer  [m3/m3]
-    real(dp),dimension(:,:),pointer::h_transp_act   ! actual transpiration [mm]
-    real(dp),dimension(:,:),pointer::h_transp_pot   ! potential transpiration [mm]
-    real(dp),dimension(:,:),pointer::h_perc         ! percolation from 2nd layer out of the root zone [mm]
-    real(dp),dimension(:,:),pointer::h_raw_sup      ! difference between water content at field capacity
-                                                    ! and threshold water content
-                                                    ! for irrigation application [mm]
-    real(dp),dimension(:,:),pointer::h_raw          ! difference between water content at field capacity and
-                                                    ! water content at RAW [mm]
-    real(dp),dimension(:,:),pointer::h_raw_inf      ! difference between water content at field capacity and
-                                                    ! threshold water content
-                                                    ! for irrigation application when water availability is low [mm]
-                                                    ! it is used to evaluate the number of the days before next irrigation application
-                                                    ! from collective water sources - USE mode
-    real(dp),dimension(:,:),pointer::h_raw_priv     ! difference between water content at field capacity and threshold water content for irrigation application from private water sources - USE mode [mm]
-    real(dp),dimension(:,:),pointer::k_s_dry        ! water scarcity stress coefficient [-]
-    real(dp),dimension(:,:),pointer::k_s_sat        ! water saturation stress coefficient [-]
-    real(dp),dimension(:,:),pointer::k_s            ! water stress coefficient [-]
-    real(dp),dimension(:,:),pointer::depth_under_rz ! depth of water table from root zone [m]
-    real(dp),dimension(:,:),pointer::h_caprise      ! capillary rise [mm]
-    real(dp),dimension(:,:),pointer::h_rise         ! rise from 2nd to 1st layer [mm]
-end type balance2_matrices
+type balance_matrices
+    type(layer_balance_matrices)::lyr(2)
+    real(dp) ,dimension(:,:), allocatable :: h_raw          ! profile water content when RAW is fully depleted [mm]
+    real(dp) ,dimension(:,:), allocatable :: h_irr_thresh   ! profile water content threshold below which general irrigation is triggered [mm]
+    real(dp) ,dimension(:,:), allocatable :: h_priv_thresh  ! profile water content threshold below which private-source irrigation is triggered [mm]
+    real(dp) ,dimension(:,:), allocatable :: h_eva          ! actual evaporation [mm]
+    real(dp) ,dimension(:,:), allocatable :: h_eva_pot      ! potential evaporation [mm]
+    real(dp) ,dimension(:,:), allocatable :: h_interc       ! interception [mm]
+    real(dp) ,dimension(:,:), allocatable :: h_pond         ! surface ponding [mm]
+    real(dp) ,dimension(:,:), allocatable :: h_inf          ! infiltration [mm]
+    real(dp) ,dimension(:,:), allocatable :: h_runoff       ! runoff [mm]
+    real(dp) ,dimension(:,:), allocatable :: h_eff_rain     ! effective rainfall [mm]
+    real(dp) ,dimension(:,:), allocatable :: h_net_av_water ! water available for infiltration after runoff [mm]
+    real(dp) ,dimension(:,:), allocatable :: h_gross_av_water!precipitation plus above-canopy irrigation [mm]
+    real(dp) ,dimension(:,:), allocatable :: k_s            ! profile water stress coefficient [-]
+    real(dp) ,dimension(:,:), allocatable :: depth_under_rz ! water-table depth below root zone [m]
+    real(dp) ,dimension(:,:), allocatable :: h_caprise      ! capillary rise into the root zone [mm]
+    real(dp) ,dimension(:,:), allocatable :: h_rise         ! rise from layer 2 to layer 1 [mm]
+end type balance_matrices
 
 type extensive                                      ! hourly steps of balance terms
 ! Definition of type extensive
@@ -106,7 +81,6 @@ end type hourly
 type unit_file_scratch
     integer,dimension(:),pointer::dxi
 end type unit_file_scratch
-
 
 type moisture               ! Moisture indicates in this case the relative water content [m^3/m^3]
     type(grid_r)::wp        ! Soil moisture at wilting point

@@ -11,6 +11,12 @@ email: claudio.gandolfi@unimi.it
 * Anna Borghi %AB%
 * Enrico Antonio Chiaradia %EAC% enrico.chiaradia@unimi.it
 * Rachele Riva %RR%
+* Paolo Soffietti %PS% paolo.soffietti@unimi.it
+
+## Documentation
+
+Visit [the official website](https://idragra.unimi.it/index.php?lang=en#resources) to download the IdrAgra manuals in pdf format.
+Alternatively, you can browse the html-based documentation on [ReadTheDocs](https://idragra-v2.readthedocs.io/) (**Under development!**)
 
 ## Conventions ##
 Please refer to the following note for reading the code and apply edits.

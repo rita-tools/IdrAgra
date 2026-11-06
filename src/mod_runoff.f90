@@ -1,8 +1,6 @@
 module mod_runoff
-use mod_constants, only: sp, dp
+use mod_constants, only: dp
 use mod_grid, only: grid_i, grid_r
-! use mod_parameters, only: pond ! NOT USED
-use mod_crop_phenology, only: crop_pars_matrices
 use mod_common, only: moisture
 implicit none
 
@@ -24,11 +22,11 @@ end type output_cn
 
 contains
 
-subroutine CN_runoff(gross_av_water,net_av_water,h_irr, domain, pheno, runoff, cn, lambda_cn)
+subroutine CN_runoff(gross_av_water,net_av_water,h_irr, domain, is_rice_paddy, runoff, cn, lambda_cn)
     ! Runoff calculation according to SCS-CN method (daily calculation)
     real(dp),dimension(:,:),intent(in)::h_irr                      ! irrigation water [mm]
     type(grid_i),intent(in)::domain                                ! simulation domain [-,-]
-    type(crop_pars_matrices),intent(in)::pheno                     ! phenological parameters
+    logical, dimension(:,:), intent(in) :: is_rice_paddy           ! Identifies rice paddies, which get runoff=0
     real(dp),dimension(:,:),intent(in)::cn                         ! cn distribution
     real(dp),intent(in)::lambda_cn                                 ! lambda CN [-]]
     real(dp),dimension(:,:),intent(inout)::gross_av_water          ! water available [mm]
@@ -40,15 +38,12 @@ subroutine CN_runoff(gross_av_water,net_av_water,h_irr, domain, pheno, runoff, c
     S=0.;Ia=0.;runoff=0.
 
     where(domain%mat/=domain%header%nan)
-        where (pheno%cn_class/=7 .or. (pheno%cn_class==7 .and. pheno%k_cb==0))
-            ! runoff is calculated for all soil uses except from rice
-            ! if soil use is rice (cn==7) and rice is growing (kcb/=0), runoff=0, as initialized
+        where (.not. is_rice_paddy) ! Rice receives runoff=0 (as initialized)
             S=25.4*((1000./cn)-10.)
             Ia=lambda_cn*S
             runoff = ((gross_av_water-Ia)**2.)/(gross_av_water+0.8*S)
             runoff = merge (runoff,0.0D0,gross_av_water > Ia)
             runoff = merge (runoff, net_av_water, net_av_water > runoff)
-            !runoff = 0.0D0 !FAKE
             net_av_water = net_av_water - runoff
         end where
     end where

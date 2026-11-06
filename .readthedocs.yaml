@@ -1,0 +1,21 @@
+version: 2
+
+formats:
+  - pdf #Additionally builds a downloadable pdf
+
+build:
+  os: ubuntu-24.04
+  tools:
+    python: "3.12"
+  jobs:
+    pre_build:
+      # Remove --allow-undocumented once the parameter inventory is complete.
+      - python docs/tools/check_parameters.py --allow-undocumented
+
+sphinx:
+  configuration: docs/conf.py
+  fail_on_warning: true
+
+python:
+  install:
+    - requirements: docs/requirements.txt

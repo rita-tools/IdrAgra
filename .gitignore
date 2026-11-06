@@ -7,4 +7,7 @@ demo/simout/**
 .codex_tmp
 *.zip
 /demo/final_condition
+/demo/IdrAgra_console.log
+docs/_build/
+__pycache__/
 **/__pycache__

@@ -1,16 +1,7 @@
 module mod_utility
 
-use mod_constants, only: sp, dp, pi
+use mod_constants, only: dp, pi
 implicit none
-
-! type that stores date
-type date
-    integer::day
-    integer::month
-    integer::year
-    integer::doy
-    integer::weekday
-end type date
 
 private get_value_index_i, get_value_index_c
 
@@ -18,39 +9,88 @@ interface get_value_index
     module procedure get_value_index_i, get_value_index_c
 end interface
 
-interface split_date
-    module procedure split_date_c, split_date_d
-end interface
-
 contains
 
-! Count the frequency of unique values from vec
-subroutine count_element(vec,vec_el)
-    implicit none
-    character(len=*),dimension(:),intent(in) :: vec
-    integer,dimension(:),intent(inout) :: vec_el
+! Remove comments and normalize whitespace in a text line
+pure function clean_input_line(line) result(cleaned)
+    character(len=*), intent(in) :: line
+    character(len=len(line)) :: cleaned
+    integer :: comment_idx, idx
 
-    integer :: i
-    logical,dimension(size(vec)) :: mask
-    integer,dimension(size(vec)) :: count_vec
+    cleaned = line
+    comment_idx = scan(cleaned, '#')
+    if (comment_idx > 0) cleaned(comment_idx:) = ' '
 
-    ! Select the unique elements
-    mask(1)=.true.
-    do i=size(vec),2,-1
-        mask(i)= .not.(any(vec(:i-1)==vec(i)))
+    do idx = 1, len_trim(cleaned)
+        if (cleaned(idx:idx) == achar(9)) cleaned(idx:idx) = ' '
     end do
 
-    ! Count the number of occurrences of elements
-    do i=1,size(vec)
-        count_vec(i) = count(vec(i)==vec)
+    cleaned = adjustl(cleaned)
+end function clean_input_line
+
+pure function join_path(folder, file_name, separator) result(path)
+    character(len=*), intent(in) :: folder, file_name
+    character, intent(in) :: separator
+    character(len=:), allocatable :: path
+    integer :: folder_length
+
+    folder_length = len_trim(folder)
+    if (folder_length == 0) then
+        path = trim(file_name)
+    else if (folder(folder_length:folder_length) == '/' .or. &
+           & folder(folder_length:folder_length) == achar(92)) then
+        path = trim(folder)//trim(file_name)
+    else
+        path = trim(folder)//separator//trim(file_name)
+    end if
+end function join_path
+
+! Integer-to-string conversion without leading or trailing spaces.
+pure function itoa(value) result(string)
+    integer, intent(in) :: value
+    character(len=:), allocatable :: string
+    character(len=32) :: buffer
+
+    write(buffer, '(I0)') value
+    string = trim(buffer)
+end function itoa
+
+! Count occurrences of each unique string, preserving first-seen order.
+! e.g. ["a","a","b","a","c","c"] --> [3, 1, 2]
+subroutine count_elements(strings, counts)
+    character(len=*), dimension(:), intent(in) :: strings
+    integer, dimension(:), allocatable, intent(out) :: counts
+
+    integer :: i, n_unique_strings
+    logical :: already_counted
+
+    n_unique_strings = 0
+
+    ! Determine the result size from the number of first occurrences.
+    do i = 1, size(strings)
+        already_counted = .false.
+        if (i > 1) already_counted = any(strings(:i-1) == strings(i))
+        if (already_counted) cycle
+
+        n_unique_strings = n_unique_strings + 1
     end do
 
-    vec_el = pack(count_vec, mask)
-end subroutine count_element
+    allocate(counts(n_unique_strings))
+
+    ! Store counts in the same first-seen order.
+    n_unique_strings = 0
+    do i = 1, size(strings)
+        already_counted = .false.
+        if (i > 1) already_counted = any(strings(:i-1) == strings(i))
+        if (already_counted) cycle
+
+        n_unique_strings = n_unique_strings + 1
+        counts(n_unique_strings) = count(strings == strings(i))
+    end do
+end subroutine count_elements
 
 subroutine split_string(string, delimiter, substrings, substring_count)
     ! split a string into two sides of a delimiter token
-    implicit none
     character(len=*), intent(in) :: string
     character, intent(in) :: delimiter
     character(len=*), intent(out) :: substrings(*)
@@ -172,14 +212,12 @@ pure function make_numbered_name(n,ext) result(num_name)
     integer, intent(in)::n              ! number of file
     character(len=4),intent(in)::ext    ! file extention
     character(len=30)::num_name         ! complete numbered name
-    write(num_name,*)n
-    num_name=trim(adjustl(num_name))//trim(adjustl(ext))
+    num_name = itoa(n)//trim(adjustl(ext))
 end function make_numbered_name
 
 subroutine get_uniform_sample(irandom, amplitude, rand_symmetry,repeatable)
     ! Get a matrix of random number from a matrix of integer values
     ! values are included between [-amplitude, +amplitude]
-    implicit none
     integer,dimension(:,:),intent(out)::irandom
     integer,intent(in)::amplitude
     logical,intent(in)::rand_symmetry
@@ -200,140 +238,6 @@ subroutine get_uniform_sample(irandom, amplitude, rand_symmetry,repeatable)
     end if
 
 end subroutine get_uniform_sample
-
-function calc_doy(idd,imm,iyyy)
-    ! Calculate the day of the year from day, month, year
-    ! source: Numerical recipes in FORTRAN 90
-    implicit none
-    integer, intent(in) :: imm, idd, iyyy
-    integer :: calc_doy
-    integer, parameter :: igreg=15+31*(10+12*1582) ! Gregorian Calendar adopted Oct. 15, 1582.
-    integer :: ja,jm,jy
-    jy=iyyy
-    if (jy == 0) stop 'calc_doy: there is no year zero'
-    if (jy < 0) jy = jy+1
-    if (imm > 2) then
-        jm = imm+1
-    else
-        jy = jy-1
-        jm = imm+13
-    end if
-    calc_doy = floor(365.25 * jy) + floor(30.6001 * jm) + idd + 1720995
-    if (idd + 31 * (imm+12*iyyy) >= igreg) then !Test whether to change to Gregorian Calendar.
-        ja=floor(0.01 * jy)
-        calc_doy = calc_doy + 2 - ja + floor(0.25 * ja)
-    end if
-end function calc_doy
-
-subroutine calc_date(julian_day,idd, imm,iyyy)
-    ! Calculate the date from the julian date
-    ! source: Numerical recipes in FORTRAN 90
-    implicit none
-    integer, intent(in) :: julian_day
-    integer, intent(out) :: imm, idd, iyyy
-    integer :: ja,jalpha,jb,jc,jd,je
-    integer, parameter :: igreg=2299161
-    if (julian_day >= igreg) then
-        jalpha=int(((julian_day-1867216)-0.25)/36524.25)
-        ja=julian_day+1+jalpha-int(0.25*jalpha)
-    else if (julian_day < 0) then
-        ja=julian_day+36525*(1-julian_day/36525)
-    else
-        ja=julian_day
-    end if
-    jb=ja+1524
-    jc=int(6680.0+((jb-2439870)-122.1)/365.25)
-    jd=365*jc+int(0.25*jc)
-    je=int((jb-jd)/30.6001)
-    idd=jb-jd-int(30.6001*je)
-    imm=je-1
-    if (imm > 12) imm = imm-12
-    iyyy=jc-4715
-    if (imm > 2) iyyy=iyyy-1
-    if (iyyy <= 0) iyyy=iyyy-1
-    if (julian_day < 0) iyyy=iyyy-100*(1-julian_day/36525)
-end subroutine calc_date
-
-function day_of_week(idd, imm, iyy)
-    ! Calculate the day of the week [0- Sat, 1-Sun, ..., 6-Fri]
-    ! source: Rosetta Code
-    implicit none
-    integer, intent(in) :: idd, imm, iyy
-    integer :: day_of_week, j, k, mm, yy
-
-    if (imm < 2) then
-        mm = imm + 12
-        yy = iyy - 1
-    end if
-    j = yy/100           ! first two digits of the year
-    k = mod (yy, 100)    ! last two digits of the year
-    day_of_week = mod (idd + (mm+1)*26/10 + k + k/4 + j/4 + 5*j, 7)
-end function day_of_week
-
-subroutine days_x_month(calendar,year)
-    ! Get the number of days for each months in the provided year
-    integer,dimension(:),intent(out)::calendar
-    integer,intent(in)::year
-
-    if(mod(year,400)==0 .or. (mod(year,4)==0 .and. (.not.(mod(year,100)==0)))) then  ! leap year
-        calendar=(/31,29,31,30,31,30,31,31,30,31,30,31/)
-    else    ! other
-        calendar=(/31,28,31,30,31,30,31,31,30,31,30,31/)
-    end if
-end subroutine days_x_month
-
-subroutine split_date_c(instring, date1, date2)
-    ! return the string dates from a string where are separated by delimeter
-    character(len=*), intent(in) :: instring
-    character(len=300), intent(out):: date1, date2
-    character(len=300) :: string
-    character(len=2), parameter:: delimiter = '->'
-    integer :: index
-
-    string = TRIM(instring)
-    index = SCAN(string, delimiter)
-    if (index == 0) then
-        print *, 'Input files do not list end date or the delimiter "->" is not used'
-        print *, 'Execution will be aborted...'
-        stop
-    end if
-    date1 = string(1:index-1)
-    index = SCAN(string, delimiter, .TRUE.)
-    date2 = string(index+1:)
-end subroutine split_date_c
-
-subroutine split_date_d(instring, outdate)
-    ! return the date from a string where are separated by delimiter in the order day/month/year
-    ! TODO: general format
-    character(len=*), intent(in) :: instring
-    type(date), intent(out):: outdate
-    character(len=1), parameter:: delimiter = '/'
-    character(len=300) :: string
-    character(len=4) :: date_num
-    integer :: index
-    integer :: ErrorFlag
-
-    ErrorFlag = 0
-    string = trim(instring)
-    index = scan(string, delimiter)
-    if (index == 0) ErrorFlag = -1
-    date_num = adjustl(string(1:index-1)) ! select the day
-    read(date_num, '(i2)') outdate%day
-    string = string(index+1:)
-    index = scan(string, delimiter)
-    if (index == 0) ErrorFlag = -1
-    date_num = string(1:index-1) ! select the month
-    read(date_num, '(i2)') outdate%month
-    date_num = string(index+1:) ! select the year
-    read(date_num, '(i4)') outdate%year
-    ! TODO: add control to check date validity
-    if (ErrorFlag == -1) then
-        print *, 'Input files are not correctly formatted'
-        print *, 'Right date format is dd/mm/yyyy'
-        print *, 'Execution will be aborted...'
-        stop
-    end if
-end subroutine split_date_d
 
 function string_to_integers(str, sep) result(a)
     ! return a sequence of integers from a string
@@ -375,7 +279,6 @@ end function string_to_reals
 
 pure recursive function replace_str(string,search,substitute) result(modifiedString)
     ! https://stackoverflow.com/questions/58938347/how-do-i-replace-a-character-in-the-string-with-another-charater-in-fortran
-    implicit none
     character(len=*), intent(in)  :: string, search, substitute
     character(len=:), allocatable :: modifiedString
     integer                       :: i, stringLen, searchLen
@@ -403,15 +306,7 @@ pure recursive function replace_str(string,search,substitute) result(modifiedStr
     end do
 end function replace_str
 
-function round(val, n)
-    implicit none
-    real(dp) :: val, round
-    integer :: n
-    round = anint(val*10.0**n)/10.0**n
-end function round
-
 function round_2darray(mat, n) result(res)
-    implicit none
     real(dp), dimension(:,:)::mat
     real(dp), allocatable ::res(:,:)
     integer :: n
@@ -420,7 +315,6 @@ function round_2darray(mat, n) result(res)
 end function round_2darray
 
 pure elemental function pdf_normal(x, x_mean, x_std) result(pdf)
-    implicit none
     real(dp), intent(in):: x, x_mean, x_std
     real(dp):: pdf
 

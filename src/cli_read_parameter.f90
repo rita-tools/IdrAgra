@@ -1,10 +1,10 @@
 module cli_read_parameter
+use mod_date, only: split_date
 use mod_parameters
 use mod_common
 use mod_grid
 use mod_irrigation, only: calc_perc_booster_pars
 use cli_watsources
-use mod_TDx_index
 use mod_system
 use mod_utility
 
@@ -13,37 +13,27 @@ implicit none
 
 contains
 
-subroutine read_all_parameters(file_xml, xml, xml_dtx, ErrorFlag, debug)
+subroutine read_all_parameters(file_xml, xml, verbose, reckless)
    character(len=*), intent(in) :: file_xml
-    logical, intent(in) :: debug
-    integer, intent(out) :: ErrorFlag
-    type(TDx_index), intent(inout) :: xml_dtx
+    logical, intent(in) :: verbose, reckless
     type(parameters), intent(inout) :: xml
     ! Input related variables used in parsing loop
     integer :: ios          ! State variable (0 = ok)
     integer :: line, tablestart
     logical :: file_exists
 
-    ErrorFlag = 0
     line = 0; tablestart = 0
     ios = 0
 
-    call make_default(xml, xml_dtx)
-
-    call read_sim_parameters(file_xml, xml, xml_dtx, ErrorFlag,debug)
+    call read_sim_parameters(file_xml, xml, reckless)
 
     inquire(file="cells.txt", exist=xml%sim%f_out_cells) ! update "output_cells"
 
     ! fw - evaporation !%AB% used for not irrigated cells or without irrigation events
     xml%irr%f_w = cost_fwEva
-    ! allocate precipitation over the 24 hours
-    allocate(xml%f_eff_rain(24))
-    ! %AB% used only for evaluate effective precipitation
-    xml%f_eff_rain = cost_f_eff_rain
 
     ! allocate ET0 over the 24 hours
     allocate(xml%fet0(24))
-    xml%fet0 = cost_fet0
     xml%ms_i%f_exists=.false. ; xml%ms_i%f_allocate_timeserie=.false. ;
     xml%ms_ii%f_exists=.false. ; xml%ms_ii%f_allocate_timeserie=.false. ;
     xml%intreu%f_exists=.false. ; xml%intreu%f_allocate_timeserie=.false. ;
@@ -78,43 +68,26 @@ subroutine read_all_parameters(file_xml, xml, xml_dtx, ErrorFlag, debug)
         xml%sim%n_irr_meth = 0
         allocate(xml%irr%met(0))
     else
-        call read_all_irr_methods(xml, ErrorFlag, debug)
+        call read_all_irr_methods(xml, verbose)
     end if
 
 end subroutine read_all_parameters
 
 
-subroutine read_sim_parameters(file_xml, xml, xml_dtx, ErrorFlag,verbose)
+subroutine read_sim_parameters(file_xml, xml, reckless)
     ! read settings for the simulation
     character(len=*), intent(in) :: file_xml
-    integer, intent(out) :: ErrorFlag
-    logical, intent(in) :: verbose
-    type(TDx_index), intent(inout) :: xml_dtx
+    logical, intent(in) :: reckless
     type(parameters), intent(inout) :: xml
-    integer :: unit_txt
-    ! Input related variables used in parsing loop
-    character(len=300) :: comment,buffer, label
-    integer :: p
-    integer :: ios          ! state variable (0 = ok)
-    integer :: line
+
+    integer :: unit_txt, p, ios, line
+    character(len=300) :: buffer, label, dir_ic, dir_fc
     logical :: dir_exists
 
-    integer :: i, j, k
-    integer :: actcroplen
-    integer,parameter :: nanvalue=-9999       ! general NaN value
-    integer,dimension(:),allocatable :: dummy
-    character(len=300) :: dir_ic, dir_fc
-
-    !character :: delimiter
-
-    ErrorFlag = 0
     line = 0
     ios = 0
-    actcroplen = 0
     dir_ic = xml%sim%initial_condition
     dir_fc = xml%sim%final_condition
-    allocate(xml%sim%clock(3))
-
     open(newunit=unit_txt, file=trim(file_xml), status="old", action="read", iostat=ios)
 
     if (ios /= 0 ) then
@@ -126,14 +99,7 @@ subroutine read_sim_parameters(file_xml, xml, xml_dtx, ErrorFlag,verbose)
         read(unit_txt, '(A)', iostat=ios) buffer
         if (ios == 0) then
             line = line + 1
-            ! remove white spaces before and after string sequences
-            buffer = trim(buffer)
-            ! check if there are comment and get only left side of the row
-            p = scan(buffer, '#')
-            if (p /= 0) then
-                comment = buffer(p+1:)
-                buffer = buffer(1:p-1)
-            end if
+            buffer = clean_input_line(buffer)
             ! if buffer is different from blank string, parse it
             if (buffer /= '') then
                 call lower_case(buffer)
@@ -161,14 +127,16 @@ subroutine read_sim_parameters(file_xml, xml, xml_dtx, ErrorFlag,verbose)
                                             )
                     case ('meteofilename') ! name of the file with the list of weather station
                         read(buffer, *, iostat=ios) xml%sim%ws_list_fn
-                    case ('phenopath') ! path to the phenophase files
-                        read(buffer, *, iostat=ios) xml%sim%pheno_path
-                        xml%sim%pheno_path = replace_str( string = xml%sim%pheno_path &
-                                            , search = "\\" &
-                                            , substitute = delimiter &
-                                            )
-                    case ('phenofileroot') ! the sub string to use as root of phenophase subfolder
-                        read(buffer, *, iostat=ios) xml%sim%pheno_root
+                    case ('cropinputsfolder')
+                        read(buffer, *, iostat=ios) xml%sim%crop_inputs_path
+                        xml%sim%crop_inputs_path = replace_str(xml%sim%crop_inputs_path, "\\", delimiter)
+                    case ('soilusesfilename')
+                        read(buffer, *, iostat=ios) xml%sim%soil_uses_fn
+                    case ('co2filename')
+                        read(buffer, *, iostat=ios) xml%sim%co2_conc_fn
+                    case ('cropfolder')
+                        read(buffer, *, iostat=ios) xml%sim%crop_parameters_path
+                        xml%sim%crop_parameters_path = replace_str(xml%sim%crop_parameters_path, "\\", delimiter)
                     case ('irrmethpath') ! path to meteo files
                         read(buffer, *, iostat=ios) xml%sim%irr_met_path
                         xml%sim%irr_met_path = replace_str( string = xml%sim%irr_met_path &
@@ -185,25 +153,25 @@ subroutine read_sim_parameters(file_xml, xml, xml_dtx, ErrorFlag,verbose)
                                             )
                     case ('mode') ! running mode: 0 - no irrigation; 1 - consumption; 2 - water needs to field capacity; 3 - water needs with fixed volume
                         read(buffer, *, iostat=ios) xml%sim%mode
-                        ! if no irrigation set startIrrSeason and endIrrSeason to -1
-                        if (xml%sim%mode == 0) then
-                            xml%sim%start_irr_season = -1
-                            xml%sim%end_irr_season = -1
-                        end if
                     case ('initialthetaflag') ! T: read init moisture from external file
                         read(buffer, *, iostat=ios) xml%sim%f_init_wc
+                        if (xml%sim%f_init_wc) then
+                            print *, "Warning: since the removal of cropcoef (IdrAgra 3.0.0 onwards), it is recommended to set InitialThetaFlag = F."
+                            print *, "Because you have set it to 'T' instead, note that crop state in the first simulation year might not be &
+                                    & representative of actual field conditions (crops can't be sown before the simulation starts)"
+                            if (.not. reckless) then
+                                print *, "press <enter> to continue "
+                                read *
+                            end if
+                        end if
                     case ('finalthetaflag') ! T: if final soil moisture condition is written on files, F if not
                         read(buffer, *, iostat=ios) xml%sim%f_theta_out
                     case ('startsimulation')    ! date of start simulation
                         read (buffer, *, iostat=ios)
-                        call split_date(buffer, xml%sim%start_simulation)
-                        xml%sim%start_simulation%doy = calc_doy(xml%sim%start_simulation%day, xml%sim%start_simulation%month, &
-                            & xml%sim%start_simulation%year)
+                        call split_date(buffer, xml%sim%start)
                     case ('endsimulation')    ! date of end simulation
                         read (buffer, *, iostat=ios)
-                        call split_date(buffer, xml%sim%end_simulation)
-                        xml%sim%end_simulation%doy = calc_doy(xml%sim%end_simulation%day, xml%sim%end_simulation%month, &
-                            & xml%sim%end_simulation%year)
+                        call split_date(buffer, xml%sim%end)
                     case ('initialconditionpath') ! path to initial condition input files
                         read(buffer, *, iostat=ios) xml%sim%initial_condition
                         xml%sim%initial_condition = replace_str( string = xml%sim%initial_condition &
@@ -232,9 +200,6 @@ subroutine read_sim_parameters(file_xml, xml, xml_dtx, ErrorFlag,verbose)
                         if (dir_exists .eqv. .true.) then
                             print *,'The directory ', trim(xml%sim%final_condition), ' already exists and will be updated'
                         else
-                            ! TODO: intrinsic 'system' non inclusa nello standard std2008
-                            !call get_environment_variable('DELIMITER',delimiter)
-                            !call system('mkdir '//delimiter//trim(xml%sim%final_condition))
                             call make_dir(xml%sim%final_condition)
                         end if
                     case ('finalcondition') ! final condition input filenames (root)
@@ -254,60 +219,60 @@ subroutine read_sim_parameters(file_xml, xml, xml_dtx, ErrorFlag,verbose)
                         end if
                     case('soilusevarflag') ! T: land use update yearly
                         read(buffer, *, iostat=ios) xml%sim%f_soiluse
-                    case ('meteostatweightnum') ! number of weather stations
-                        read(buffer, *, iostat=ios)xml%sim%n_ws
+                    case ('meteostatweightnum') ! Number of weather stations used to interpolate each cell's weather & phenology
+                        read(buffer, *, iostat=ios)xml%sim%n_interpolation_stations
                     case ('meteostattotnum') ! number of areas of weather stations TODO: check
-                        read(buffer, *, iostat=ios)xml%sim%n_voronoi
-                    case ('monthlyflag') ! monthly outputs flag
+                        read(buffer, *, iostat=ios)xml%sim%n_weather_stations
+                    case ('interpolatetemperature')
+                        read(buffer, *, iostat=ios) xml%sim%interpolate_temp
+                    case ('interpolaterain')
+                        read(buffer, *, iostat=ios) xml%sim%interpolate_rain
+                    case ('interpolatehumidity')
+                        read(buffer, *, iostat=ios) xml%sim%interpolate_hum
+                    case ('interpolatewind')
+                        read(buffer, *, iostat=ios) xml%sim%interpolate_wind
+                    case ('interpolateradiation')
+                        read(buffer, *, iostat=ios) xml%sim%interpolate_rad
+                    case ('monthlyflag') !%PS%, todo: rename or add aliases
                         select case (trim(adjustl(buffer)))
                             case ('monthly', 'month', 'm', 't')
-                                xml%sim%step_out = 0
+                                xml%sim%step_out = output_monthly
                             case ('weekly', 'week', 'w')
-                                xml%sim%step_out = 1
-                            case ('periodic', 'f')
-                                xml%sim%step_out = 2
+                                xml%sim%step_out = output_weekly
+                            case ('periodic', 'f', 'fixed')
+                                xml%sim%step_out = output_periodic
                             case default
-                                xml%sim%step_out = 0
-                                print *, "Monthly output is printed"
+                                xml%sim%step_out = output_monthly
+                                print *, 'Unrecognized output timestep option "', trim(adjustl(buffer)),'". Will use "monthly".'
                                 read *
                         end select
                     case ('weekday')
                         select case (trim(adjustl(buffer)))
                             case ('monday', 'mon', '1')
-                                xml%sim%weekday = 1
+                                xml%sim%weekly_output_weekday = 1
                             case ('tuesday', 'tue', '2')
-                                xml%sim%weekday = 2
+                                xml%sim%weekly_output_weekday = 2
                             case ('wednesday', 'wed', '3')
-                                xml%sim%weekday = 3
+                                xml%sim%weekly_output_weekday = 3
                             case ('thursday', 'thu', '4')
-                                xml%sim%weekday = 4
+                                xml%sim%weekly_output_weekday = 4
                             case ('friday', 'fri', '5')
-                                xml%sim%weekday = 5
+                                xml%sim%weekly_output_weekday = 5
                             case ('saturday', 'sat', '6')
-                                xml%sim%weekday = 6
+                                xml%sim%weekly_output_weekday = 6
                             case ('sunday', 'sun', '7')
-                                xml%sim%weekday = 7
+                                xml%sim%weekly_output_weekday = 7
                             case default
-                                xml%sim%weekday = 1
+                                xml%sim%weekly_output_weekday = 1
                                 print *, "Weekly output is printed each Monday"
                                 read *
                         end select
                     case ('startdate')
-                        read(buffer, *, iostat=ios)xml%sim%clock(1)
+                        read(buffer, *, iostat=ios) xml%sim%out_step_start
                     case ('enddate')
-                        read(buffer, *, iostat=ios)xml%sim%clock(2)
+                        read(buffer, *, iostat=ios) xml%sim%out_step_end
                     case ('deltadate')
-                        read(buffer, *, iostat=ios)xml%sim%clock(3)
-                    case ('soilusesnum') ! number of land uses to be processed
-                        read(buffer, *, iostat=ios)xml%sim%n_lus
-                    !!!! %AB% TODO: to be checked
-                    case ('simulatedsoiluses') ! list of simulated soil uses
-                        read (buffer, *, iostat=ios)
-                        allocate(dummy(xml%sim%n_lus))
-                        dummy = nanvalue
-                        dummy = string_to_integers(buffer(2:len_trim(buffer)), " ")
-                    ! case ('randsowdaysseed')
-                    !           read(buffer, *, iostat=ios) xml%sim%rand_seed
+                        read(buffer, *, iostat=ios) xml%sim%out_step_days
                     case ('randsowdayssym')
                         select case (trim(adjustl(buffer)))
                             case ('symmetric', 's', '1', 't', 'true')
@@ -321,6 +286,10 @@ subroutine read_sim_parameters(file_xml, xml, xml_dtx, ErrorFlag,verbose)
                         end select
                     case ('randsowdayswind') ! range of sowinf
                         read(buffer, *, iostat=ios) xml%sim%sowing_range
+                    case ('aggressivesowing')
+                        read(buffer, *, iostat=ios) xml%sim%aggressive_sowing
+                    case ('readcropmaps')
+                        read(buffer, *, iostat=ios) xml%sim%read_crop_maps
                     case ('repeatable') ! set simulation with random seeding repeatible
                         if ((trim(adjustl(buffer)) == 'true') .or. (trim(adjustl(buffer))== 't') .or. (trim(adjustl(buffer)) == '1'))  then
                             xml%sim%repeatable = .true.
@@ -340,10 +309,8 @@ subroutine read_sim_parameters(file_xml, xml, xml_dtx, ErrorFlag,verbose)
                         read(buffer, *, iostat=ios)xml%sim%quantiles(2,2)
                     case ('startirrseason') ! start doy of irrigation season
                         read(buffer, *, iostat=ios)xml%sim%start_irr_season
-                        if (xml%sim%mode == 0) xml%sim%start_irr_season = -1
                     case ('endirrseason') ! end doy of irrigation season
                         read(buffer, *, iostat=ios)xml%sim%end_irr_season
-                        if (xml%sim%mode == 0) xml%sim%end_irr_season = -1
                     case ('lim_prec') ! Minimum meaningfull precipitation
                         read(buffer, *, IOSTAT=ios)xml%sim%h_prec_lim
                     case ('zevap') ! Ze_fix: thickness of the first layer
@@ -352,20 +319,6 @@ subroutine read_sim_parameters(file_xml, xml, xml_dtx, ErrorFlag,verbose)
                         read(buffer, *, iostat=ios)xml%depth%zr_fix
                     case ('lambdacn') ! lambda_CN: coefficient for calculate the initial abstraction
                         read(buffer, *, iostat=ios)xml%sim%lambda_cn
-                    case ('dtxmode') ! DTx mode calculation
-                        read(buffer, *, iostat=ios)xml_dtx%mode
-                    case ('dtxnumxs') ! Number of indicators to calculate
-                        read(buffer, *, iostat=ios)xml_dtx%temp%n_ind
-                    case ('dtx_x') ! number of days to use to calculate the dtx indicators
-                        allocate(xml_dtx%temp%x(xml_dtx%temp%n_ind))
-                        read(buffer, *, iostat=ios) xml_dtx%temp%x
-                    case ('dtxdeltadate') ! validity of the report
-                        read(buffer, *, iostat=ios)xml_dtx%temp%td
-                    case ('dtxdelaydays') ! Shift di report delivering
-                        read(buffer, *, iostat=ios)xml_dtx%temp%delay
-                    case ('dtxmincard') ! Number of values to obtain meaningfull statistics
-                        read(buffer, *, iostat=ios)xml_dtx%n
-
                     ! add new case to edit input files for irrigation
                     case ('watsources_fn') ! list of water sources for each irrigation units
                         read(buffer, *, iostat=ios) xml%sim%watsources_fn
@@ -412,7 +365,7 @@ subroutine read_sim_parameters(file_xml, xml, xml_dtx, ErrorFlag,verbose)
                     case ('prt_cell_all')
                         read(buffer, *, iostat=ios) xml%sim%prt_cell_all
                         ! call the function to set print option on/off (y/n)
-                        call print_cell_all(xml%sim%prt_debug, xml%sim)
+                        call print_cell_all(xml%sim%prt_cell_all, xml%sim)
                     ! set specific options for printing
                     case ('prt_stp_rain')
                         read(buffer, *, iostat=ios) xml%sim%prt_stp_rain
@@ -529,27 +482,16 @@ subroutine read_sim_parameters(file_xml, xml, xml_dtx, ErrorFlag,verbose)
         end if
     end do
 
-    ! Pause before overwriting the output directory
-    !%PS%: moved to after the parsing loop so that:
-    !   1. xml%sim%use_modflow_coupling is already defined (coupling requires skipping the pause)
-    !   2. the user gets to read any "invalid label" messages during the pause
+    ! Coupled runs are controlled by the Python interface and must not pause for input.
     inquire(file=trim(xml%sim%path), exist=dir_exists)
-    if (dir_exists .eqv. .true.) then
-        print *,'The directory ', trim(xml%sim%path), ' already exists and will be overwritten'
-        if (.not. xml%sim%use_modflow_coupling) then
+    if (dir_exists) then
+        print *,'The directory ', trim(xml%sim%path), ' already exists and will be updated'
+        if (.not. reckless .and. .not. xml%sim%use_modflow_coupling) then
             print *, " <enter> to continue "
             read *
         end if
     else
         call make_dir(xml%sim%path)
-    end if
-
-    if (xml%sim%step_out == 1) then
-        ! take into account the last week of the previos year and the first of the following year
-        allocate(xml%sim%intervals(54))
-    else if (xml%sim%step_out == 2) then
-        allocate(xml%sim%intervals(int(((xml%sim%clock(2)-xml%sim%clock(1))/xml%sim%clock(3)))))
-        xml%sim%intervals=xml%sim%clock(3)
     end if
 
     if (xml%sim%initial_condition == dir_ic .and. xml%sim%input_path /= dir_ic) then
@@ -560,51 +502,6 @@ subroutine read_sim_parameters(file_xml, xml, xml_dtx, ErrorFlag,verbose)
     end if
 
     close(unit_txt)
-
-    if (allocated(dummy)) then
-        actcroplen = size(dummy)
-    else
-        actcroplen = xml%sim%n_lus
-        allocate(dummy(xml%sim%n_lus))
-        dummy(1:xml%sim%n_lus) = (/(i, i=1, xml%sim%n_lus, 1)/)
-    end if
-
-    allocate(xml%sim%lu_list(actcroplen))
-    k = 1
-    do j = 1, actcroplen
-        do i = k, xml%sim%n_lus
-            if (dummy(i) /= nanvalue) then
-                xml%sim%lu_list(j) = dummy(i)
-                k = i + 1
-                exit
-            end if
-        end do
-    end do
-    deallocate(dummy)
-
-    allocate(dummy(xml%sim%n_lus))
-    dummy(1:xml%sim%n_lus) = (/(i, i=1, xml%sim%n_lus, 1)/)
-    do i = 1, actcroplen
-        where (dummy == xml%sim%lu_list(i)) dummy = nanvalue
-    end do
-
-    allocate(xml%sim%no_lu_list(xml%sim%n_lus - actcroplen))
-    k = 1
-
-    do j = 1, size(xml%sim%no_lu_list)
-        do i = k, xml%sim%n_lus
-            if (dummy(i) /= nanvalue) then
-                xml%sim%no_lu_list(j) = dummy(i)
-                k = i + 1
-                exit
-            end if
-        end do
-    end do
-
-    if (verbose .eqv. .true.) then
-        print *, "Simulated land-use classes:", xml%sim%lu_list
-        print *, "Not simulated land-use classes:", xml%sim%no_lu_list
-    end if
 end subroutine read_sim_parameters
 
 ! TODO: %EAC% at the moment the id of the irrigation method define its order in the list
@@ -733,9 +630,8 @@ subroutine read_irr_method(irr_method_fn, met, verbose)
     end if
 end subroutine read_irr_method
 
-subroutine read_all_irr_methods(xml, ErrorFlag, debug)
+subroutine read_all_irr_methods(xml, debug)
     logical, intent(in) :: debug
-    integer, intent(out) :: ErrorFlag
     type(parameters), intent(inout) :: xml
     integer :: free_unit
     integer :: i
@@ -746,7 +642,6 @@ subroutine read_all_irr_methods(xml, ErrorFlag, debug)
     integer :: ios          ! state variable (0 = ok)
     integer :: line, tablestart
 
-    ErrorFlag = 0
     line = 0; tablestart = 0
     ios = 0
     print*,'irr_met_path: ',     xml%sim%irr_met_path
@@ -831,8 +726,9 @@ subroutine read_spatial_info(info_spat, extent, sim, tab_CN2, tab_CN3, theta2_ri
         case (0)
             print *, 'Irrigation distribution parameters are not set'
         case (1:4)
-            call read_irr_grid(info_spat, extent, sim, met)
+            call read_irr_grid(info_spat, extent, sim)
             call check_irr_grid(info_spat, sim)
+            call calc_perc_booster_pars(info_spat, met, sim%quantiles)
         case default
             stop 'Simulation mode has been incorrectly set'
     end select
@@ -880,7 +776,7 @@ subroutine read_grid_files(info_spat, extent, sim)
     if(sim%f_init_wc .eqv. .true.)then  ! from external files
         call read_grid(trim(dir_ic)//trim(sim%thetaI_0_fn)//'.asc',info_spat%theta(1)%old,sim,extent)
         call read_grid(trim(dir_ic)//trim(sim%thetaII_0_fn)//'.asc',info_spat%theta(2)%old,sim,extent)
-    else                            ! from the first year of simulation warm-up
+    else ! Warmup starts at FC moisture; first actual year overwrites this using warmup_theta later 
         call read_grid(trim(dir)//trim(sim%thetaI_FC_fn)//'.asc',info_spat%theta(1)%old,sim,extent)
         call read_grid(trim(dir)//trim(sim%thetaII_FC_fn)//'.asc',info_spat%theta(2)%old,sim,extent)
     end if
@@ -888,7 +784,7 @@ subroutine read_grid_files(info_spat, extent, sim)
     ! read initial land use map
     if (sim%f_soiluse .eqv. .false.)then  ! Static land use map
         call read_grid(trim(dir)//trim(sim%soiluse_fn)//'.asc',info_spat%soil_use_id,sim,extent)
-        call overlay_domain (info_spat%soil_use_id,info_spat%domain)   ! Set to NaN non simulated soil uses
+        call overlay_domain(info_spat%soil_use_id, info_spat%domain, sim%soiluse_fn)
     else                                ! Dynamic land use map
         write (start_year, *) sim%start_year
         call read_grid(trim(dir)//trim(sim%soiluse_fn)//'_'//trim(adjustl(start_year))//'.asc', &
@@ -917,7 +813,7 @@ subroutine read_grid_files(info_spat, extent, sim)
     end if
 
     ! read weather station weights
-    allocate(info_spat%weight_ws(sim%n_ws))
+    allocate(info_spat%weight_ws(sim%n_interpolation_stations))
     do k=1,size(info_spat%weight_ws)
         write(k_str,*) k
         call read_grid(trim(dir)//trim(sim%meteoweight_fn)//'_'//trim(adjustl(k_str))//'.asc',&
@@ -943,12 +839,11 @@ subroutine read_grid_files(info_spat, extent, sim)
 
 end subroutine read_grid_files
 
-subroutine read_irr_grid(info_spat, extent, sim, met)
+subroutine read_irr_grid(info_spat, extent, sim)
     ! distributed parameters for irrigation
     type(bound),intent(in)::extent
     type(simulation),intent(inout)::sim
-    type(par_method),dimension(:),intent(inout)::met
-    type(spatial_info),intent(out)::info_spat
+    type(spatial_info),intent(inout)::info_spat
     character(len=300)::dir
     character(len=30)::start_year
 
@@ -989,7 +884,7 @@ subroutine read_irr_grid(info_spat, extent, sim, met)
             !call read_matrices(trim(dir)//trim(sim%eff_rete_fn)//'.asc',info_spat%eff_rete,sim,confini) - RR
         case (4)
             call read_grid(trim(dir)//trim(sim%irr_units_fn)//'.asc',info_spat%irr_unit_id,sim,extent)
-            call overlay_domain(info_spat%irr_unit_id,info_spat%domain)
+            call overlay_domain(info_spat%irr_unit_id, info_spat%domain, sim%irr_units_fn)
             if (sim%f_soiluse .eqv. .false.) then
                 call read_grid(trim(dir)//trim(sim%id_irr_meth_fn)//'.asc',info_spat%irr_meth_id,sim,extent)
                 call read_grid(trim(dir)//trim(sim%eff_irr_fn)//'.asc',info_spat%eff_met,sim,extent)
@@ -1004,36 +899,32 @@ subroutine read_irr_grid(info_spat, extent, sim, met)
         case default
     end select
     print *, "Irrigation distribution parameters have been read"
-    ! calculate the parameter for the percolative booster TODO: move away from the reading routines
-    call calc_perc_booster_pars(info_spat,met,sim%quantiles)
 
 end subroutine read_irr_grid
 
 subroutine check_grid(info_spat, sim)
     ! check grid extension respect to the domain
-    ! Note: only water table depth is not verified
-    ! so, it cannot be called inside the reading routine
     ! TODO: reorganize the function
     type(simulation),intent(inout)::sim
-    type(spatial_info),intent(out)::info_spat
+    type(spatial_info),intent(inout)::info_spat
     integer::k
     character(len=30)::k_str
 
-    call overlay_domain(info_spat%theta(1)%sat,info_spat%domain)
-    call overlay_domain(info_spat%theta(2)%sat,info_spat%domain)
-    call overlay_domain(info_spat%theta(1)%fc,info_spat%domain)
-    call overlay_domain(info_spat%theta(2)%fc,info_spat%domain)
-    call overlay_domain(info_spat%theta(1)%wp,info_spat%domain)
-    call overlay_domain(info_spat%theta(2)%wp,info_spat%domain)
-    call overlay_domain(info_spat%theta(1)%r,info_spat%domain)
-    call overlay_domain(info_spat%theta(2)%r,info_spat%domain)
-    call overlay_domain(info_spat%k_sat(1),info_spat%domain)
-    call overlay_domain(info_spat%k_sat(2),info_spat%domain)
-    call overlay_domain(info_spat%fact_n(1),info_spat%domain)
-    call overlay_domain(info_spat%fact_n(2),info_spat%domain)
-    call overlay_domain(info_spat%slope,info_spat%domain)
-    call overlay_domain(info_spat%drainage,info_spat%domain)
-    call overlay_domain(info_spat%hydr_gr,info_spat%domain)
+    call overlay_domain(info_spat%theta(1)%sat, info_spat%domain, sim%thetaI_sat_fn )
+    call overlay_domain(info_spat%theta(2)%sat, info_spat%domain, sim%thetaII_sat_fn)
+    call overlay_domain(info_spat%theta(1)%fc,  info_spat%domain, sim%thetaI_FC_fn  )
+    call overlay_domain(info_spat%theta(2)%fc,  info_spat%domain, sim%thetaII_FC_fn )
+    call overlay_domain(info_spat%theta(1)%wp,  info_spat%domain, sim%thetaI_WP_fn  )
+    call overlay_domain(info_spat%theta(2)%wp,  info_spat%domain, sim%thetaII_WP_fn )
+    call overlay_domain(info_spat%theta(1)%r,   info_spat%domain, sim%thetaI_r_fn   )
+    call overlay_domain(info_spat%theta(2)%r,   info_spat%domain, sim%thetaII_r_fn  )
+    call overlay_domain(info_spat%k_sat(1),     info_spat%domain, sim%ksat_I_fn     )
+    call overlay_domain(info_spat%k_sat(2),     info_spat%domain, sim%ksat_II_fn    )
+    call overlay_domain(info_spat%fact_n(1),    info_spat%domain, sim%n_I_fn        )
+    call overlay_domain(info_spat%fact_n(2),    info_spat%domain, sim%n_II_fn       )
+    call overlay_domain(info_spat%slope,        info_spat%domain, sim%slope_fn      )
+    call overlay_domain(info_spat%drainage,     info_spat%domain, sim%dren_fn       )
+    call overlay_domain(info_spat%hydr_gr,      info_spat%domain, sim%hydr_group_fn )
 
     if(sim%f_init_wc .eqv. .true.)then  ! Initial moisture condition defined externally
         where(info_spat%domain%mat/=info_spat%domain%header%nan .and. &
@@ -1045,23 +936,23 @@ subroutine check_grid(info_spat, sim)
             info_spat%theta(2)%old%mat = info_spat%theta(2)%fc%mat
         end where
     else                                ! Initial condition calculated from the first warm-up period
-        call overlay_domain(info_spat%theta(1)%old,info_spat%domain)
-        call overlay_domain(info_spat%theta(2)%old,info_spat%domain)
+        call overlay_domain(info_spat%theta(1)%old, info_spat%domain, sim%thetaI_FC_fn)
+        call overlay_domain(info_spat%theta(2)%old, info_spat%domain, sim%thetaII_FC_fn)
     end if
 
     ! check the parameters of the capillary rise model
     if(sim%f_cap_rise .eqv. .true.)then
-        call overlay_domain(info_spat%wat_tab,info_spat%domain)
+        call overlay_domain(info_spat%wat_tab, info_spat%domain, sim%wat_table_fn)
         if(minval(info_spat%wat_tab%mat,info_spat%wat_tab%mat/=info_spat%wat_tab%header%nan)<0.)then
             print*,"A null value has been set where groundwater levels are negative"
             where(info_spat%wat_tab%mat<0. .and. info_spat%wat_tab%mat/=info_spat%wat_tab%header%nan)info_spat%wat_tab%mat=0.
         end if
-        call overlay_domain(info_spat%a3,info_spat%domain)
-        call overlay_domain(info_spat%a4,info_spat%domain)
-        call overlay_domain(info_spat%b1,info_spat%domain)
-        call overlay_domain(info_spat%b2,info_spat%domain)
-        call overlay_domain(info_spat%b3,info_spat%domain)
-        call overlay_domain(info_spat%b4,info_spat%domain)
+        call overlay_domain(info_spat%a3, info_spat%domain, sim%ParRisCap_a3_fn)
+        call overlay_domain(info_spat%a4, info_spat%domain, sim%ParRisCap_a4_fn)
+        call overlay_domain(info_spat%b1, info_spat%domain, sim%ParRisCap_b1_fn)
+        call overlay_domain(info_spat%b2, info_spat%domain, sim%ParRisCap_b2_fn)
+        call overlay_domain(info_spat%b3, info_spat%domain, sim%ParRisCap_b3_fn)
+        call overlay_domain(info_spat%b4, info_spat%domain, sim%ParRisCap_b4_fn)
         ! Set the minimum value of water table depth
         ! TODO: check what happen if the depth is not set
         ! TODO: check the minimum value of water table
@@ -1073,18 +964,18 @@ subroutine check_grid(info_spat, sim)
     ! weather station weights maps
     do k=1,size(info_spat%weight_ws)
         write(k_str,*) k
-        call overlay_domain(info_spat%weight_ws(k),info_spat%domain)
+        call overlay_domain(info_spat%weight_ws(k), info_spat%domain, trim(sim%meteoweight_fn)//" "//trim(adjustl(k_str)))
     end do
 
     info_spat%backup_domain = info_spat%domain
     info_spat%backup_domain%mat = info_spat%domain%mat
 
     ! land use
-    call overlay_domain(info_spat%soil_use_id,info_spat%domain)
+    call overlay_domain(info_spat%soil_use_id, info_spat%domain, sim%soiluse_fn)
     if(minval(info_spat%soil_use_id%mat,info_spat%soil_use_id%mat/=info_spat%soil_use_id%header%nan) < 1 &
             .or. maxval(info_spat%soil_use_id%mat) > sim%n_lus)then
         print *,"Soil use maps have soil uses not defined in crop database"
-        print *,"Verify the maximum allowed crop uses (SoilUsesNum) and soil maps"
+        print *, 'Verify the landuse list at ', trim(join_path(sim%crop_inputs_path, sim%soil_uses_fn, delimiter))
         print *, 'Execution will be aborted...'
         stop
     end if
@@ -1093,7 +984,7 @@ end subroutine check_grid
 subroutine check_irr_grid(info_spat, sim)
     ! check irrigation parameters grids
     type(simulation),intent(inout)::sim
-    type(spatial_info),intent(out)::info_spat
+    type(spatial_info),intent(inout)::info_spat
     integer::ios
     character(len=300)::dir
     integer :: line
@@ -1101,31 +992,38 @@ subroutine check_irr_grid(info_spat, sim)
     dir = sim%input_path
     line = 0
     ios = 0
+    call validate_irr_method_map(info_spat%irr_meth_id, info_spat%domain, sim%n_irr_meth, sim%id_irr_meth_fn)
     select case (sim%mode)
         case (1)
-            call overlay_domain(info_spat%irr_unit_id,info_spat%domain)
-            ! fix not defined irrigation methods
-            call set_default_par(info_spat%irr_meth_id, info_spat%domain, 1)
+            call overlay_domain(info_spat%irr_unit_id, info_spat%domain, sim%irr_units_fn)
             call set_default_par(info_spat%eff_net,info_spat%domain, 1.0D0)
         case (2)
-            call set_default_par(info_spat%irr_meth_id, info_spat%domain, 1)
             !call check_mat_irrigation(info_spat%eff_rete,info_spat%domain, 1.0D0) - %RR%
             call set_default_par(info_spat%eff_met, info_spat%domain, 1.0D0)
         case (3)
-            call set_default_par(info_spat%irr_meth_id, info_spat%domain, 1)
             !call check_mat_irrigation(info_spat%eff_rete,info_spat%domain, 1.0D0) - %RR%
         case (4)
-            call overlay_domain(info_spat%irr_unit_id,info_spat%domain)
-            call set_default_par(info_spat%irr_meth_id, info_spat%domain, 1)
+            call overlay_domain(info_spat%irr_unit_id, info_spat%domain, sim%irr_units_fn)
             call set_default_par(info_spat%eff_met, info_spat%domain, 1.0D0)
             call set_default_par(info_spat%eff_net,info_spat%domain, 1.0D0)
         case default
     end select
-    call set_default_par(info_spat%a_perc(1), info_spat%domain, 1.0D0)
-    call set_default_par(info_spat%a_perc(2), info_spat%domain, 1.0D0)
-    call set_default_par(info_spat%b_perc(1), info_spat%domain, 1.0D0)
-    call set_default_par(info_spat%b_perc(2), info_spat%domain, 1.0D0)
+    !%PS%: removed set_default_pars for booster parameters; calc_perc_booster_pars already applies the defaults internally
 end subroutine check_irr_grid
+
+subroutine validate_irr_method_map(method_grid, domain_grid, n_methods, map_name)
+    ! Verify that the irrigation method map contains only valid method IDs (NaNs are removed from the domain)
+    type(grid_i), intent(inout) :: method_grid, domain_grid
+    integer, intent(in) :: n_methods
+    character(len=*), intent(in) :: map_name
+
+    call overlay_domain(method_grid, domain_grid, map_name)
+    if (any(domain_grid%mat /= domain_grid%header%nan .and. (method_grid%mat < 0 .or. method_grid%mat > n_methods))) then
+        print *, "Error in irrigation method map '", trim(map_name), "': IDs other than NoData must be between 0 and ", n_methods
+        print *, "Execution will be aborted..."
+        stop
+    end if
+end subroutine validate_irr_method_map
 
 subroutine read_rice_parameters(sim, theta2_rice)
     ! read the parameters specific for rice paddy
@@ -1144,7 +1042,7 @@ subroutine read_rice_parameters(sim, theta2_rice)
     open(newunit=theta2_rice%unit_soil_rice,file=trim(dir)//trim(sim%soil_prop_x_rice_fn),status='old',action='read',iostat=ios)
     if (ios /= 0) then
         !%PS%: now rice soil parameters are optional
-        print *, "WARNING: Couldn't open the rice soil properties file: ", trim(dir)//trim(sim%soil_prop_x_rice_fn), &
+        print *, "Warning: Couldn't open the rice soil properties file: ", trim(dir)//trim(sim%soil_prop_x_rice_fn), &
                & ". Rice soil properties will not be modified."
         return
     end if
@@ -1201,75 +1099,74 @@ subroutine write_init_grids(info_spat,mode,path,sim)
     character(len=*),intent(in)::path
     type(simulation),intent(in)::sim
 
-    integer::errorflag,k
+    integer :: k
     character(len=30)::meteo_stringa
 
-    call write_grid(trim(path)//'out_'//trim(sim%domain_fn)//'.asc',info_spat%domain,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%thetaI_FC_fn)//'.asc',info_spat%theta(1)%fc,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%thetaII_FC_fn)//'.asc',info_spat%theta(2)%fc,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%thetaI_WP_fn)//'.asc',info_spat%theta(1)%wp,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%thetaII_WP_fn)//'.asc',info_spat%theta(2)%wp,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%thetaI_r_fn)//'.asc',info_spat%theta(1)%r,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%thetaII_r_fn)//'.asc',info_spat%theta(2)%r,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%thetaI_SAT_fn)//'.asc',info_spat%theta(1)%sat,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%thetaII_SAT_fn)//'.asc',info_spat%theta(2)%sat,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%slope_fn)//'.asc',info_spat%slope,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%dren_fn)//'.asc',info_spat%drainage,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%hydr_group_fn)//'.asc',info_spat%hydr_gr,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%ksat_I_fn)//'.asc',info_spat%k_sat(1),errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%ksat_II_fn)//'.asc',info_spat%k_sat(2),errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%n_I_fn)//'.asc',info_spat%fact_n(1),errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%n_II_fn)//'.asc',info_spat%fact_n(2),errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%soiluse_fn)//'.asc',info_spat%soil_use_id,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%wat_table_fn)//'.asc',info_spat%wat_tab,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%ParRisCap_a3_fn)//'.asc',info_spat%a3,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%ParRisCap_a4_fn)//'.asc',info_spat%a4,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%ParRisCap_b1_fn)//'.asc',info_spat%b1,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%ParRisCap_b2_fn)//'.asc',info_spat%b2,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%ParRisCap_b3_fn)//'.asc',info_spat%b3,errorflag)
-    call write_grid(trim(path)//'out_'//trim(sim%ParRisCap_b4_fn)//'.asc',info_spat%b4,errorflag)
+    call write_grid(trim(path)//'out_'//trim(sim%domain_fn)//'.asc',info_spat%domain)
+    call write_grid(trim(path)//'out_'//trim(sim%thetaI_FC_fn)//'.asc',info_spat%theta(1)%fc)
+    call write_grid(trim(path)//'out_'//trim(sim%thetaII_FC_fn)//'.asc',info_spat%theta(2)%fc)
+    call write_grid(trim(path)//'out_'//trim(sim%thetaI_WP_fn)//'.asc',info_spat%theta(1)%wp)
+    call write_grid(trim(path)//'out_'//trim(sim%thetaII_WP_fn)//'.asc',info_spat%theta(2)%wp)
+    call write_grid(trim(path)//'out_'//trim(sim%thetaI_r_fn)//'.asc',info_spat%theta(1)%r)
+    call write_grid(trim(path)//'out_'//trim(sim%thetaII_r_fn)//'.asc',info_spat%theta(2)%r)
+    call write_grid(trim(path)//'out_'//trim(sim%thetaI_SAT_fn)//'.asc',info_spat%theta(1)%sat)
+    call write_grid(trim(path)//'out_'//trim(sim%thetaII_SAT_fn)//'.asc',info_spat%theta(2)%sat)
+    call write_grid(trim(path)//'out_'//trim(sim%slope_fn)//'.asc',info_spat%slope)
+    call write_grid(trim(path)//'out_'//trim(sim%dren_fn)//'.asc',info_spat%drainage)
+    call write_grid(trim(path)//'out_'//trim(sim%hydr_group_fn)//'.asc',info_spat%hydr_gr)
+    call write_grid(trim(path)//'out_'//trim(sim%ksat_I_fn)//'.asc',info_spat%k_sat(1))
+    call write_grid(trim(path)//'out_'//trim(sim%ksat_II_fn)//'.asc',info_spat%k_sat(2))
+    call write_grid(trim(path)//'out_'//trim(sim%n_I_fn)//'.asc',info_spat%fact_n(1))
+    call write_grid(trim(path)//'out_'//trim(sim%n_II_fn)//'.asc',info_spat%fact_n(2))
+    call write_grid(trim(path)//'out_'//trim(sim%soiluse_fn)//'.asc',info_spat%soil_use_id)
+    call write_grid(trim(path)//'out_'//trim(sim%wat_table_fn)//'.asc',info_spat%wat_tab)
+    call write_grid(trim(path)//'out_'//trim(sim%ParRisCap_a3_fn)//'.asc',info_spat%a3)
+    call write_grid(trim(path)//'out_'//trim(sim%ParRisCap_a4_fn)//'.asc',info_spat%a4)
+    call write_grid(trim(path)//'out_'//trim(sim%ParRisCap_b1_fn)//'.asc',info_spat%b1)
+    call write_grid(trim(path)//'out_'//trim(sim%ParRisCap_b2_fn)//'.asc',info_spat%b2)
+    call write_grid(trim(path)//'out_'//trim(sim%ParRisCap_b3_fn)//'.asc',info_spat%b3)
+    call write_grid(trim(path)//'out_'//trim(sim%ParRisCap_b4_fn)//'.asc',info_spat%b4)
 
     select case (mode)
         case (1)
-            call write_grid(trim(path)//'out_'//trim(sim%irr_units_fn)//'.asc',info_spat%irr_unit_id,errorflag)
-            call write_grid(trim(path)//'out_'//trim(sim%eff_net_fn)//'.asc',info_spat%eff_net,errorflag)
-            call write_grid(trim(path)//'out_'//trim(sim%id_irr_meth_fn)//'.asc',info_spat%irr_meth_id,errorflag)
-            call write_grid(trim(path)//"out_am_percI.asc",info_spat%a_perc(1),errorflag)
-            call write_grid(trim(path)//"out_am_percII.asc",info_spat%a_perc(2),errorflag)
-            call write_grid(trim(path)//"out_bm_percI.asc",info_spat%b_perc(1),errorflag)
-            call write_grid(trim(path)//"out_bm_percII.asc",info_spat%b_perc(2),errorflag)
+            call write_grid(trim(path)//'out_'//trim(sim%irr_units_fn)//'.asc',info_spat%irr_unit_id)
+            call write_grid(trim(path)//'out_'//trim(sim%eff_net_fn)//'.asc',info_spat%eff_net)
+            call write_grid(trim(path)//'out_'//trim(sim%id_irr_meth_fn)//'.asc',info_spat%irr_meth_id)
+            call write_grid(trim(path)//"out_am_percI.asc",info_spat%a_perc(1))
+            call write_grid(trim(path)//"out_am_percII.asc",info_spat%a_perc(2))
+            call write_grid(trim(path)//"out_bm_percI.asc",info_spat%b_perc(1))
+            call write_grid(trim(path)//"out_bm_percII.asc",info_spat%b_perc(2))
         case (2)
-            call write_grid(trim(path)//'out_'//trim(sim%eff_irr_fn)//'.asc',info_spat%eff_met,errorflag)
-            !call write_matrices(trim(path)//'out_'//trim(sim%eff_rete_fn)//'.asc',info_spat%eff_rete,errorflag)! - RR
-            call write_grid(trim(path)//'out_'//trim(sim%id_irr_meth_fn)//'.asc',info_spat%irr_meth_id,errorflag)
-            call write_grid(trim(path)//"out_am_percI.asc",info_spat%a_perc(1),errorflag)
-            call write_grid(trim(path)//"out_am_percII.asc",info_spat%a_perc(2),errorflag)
-            call write_grid(trim(path)//"out_bm_percI.asc",info_spat%b_perc(1),errorflag)
-            call write_grid(trim(path)//"out_bm_percII.asc",info_spat%b_perc(2),errorflag)
+            call write_grid(trim(path)//'out_'//trim(sim%eff_irr_fn)//'.asc',info_spat%eff_met)
+            !call write_matrices(trim(path)//'out_'//trim(sim%eff_rete_fn)//'.asc',info_spat%eff_rete)! - RR
+            call write_grid(trim(path)//'out_'//trim(sim%id_irr_meth_fn)//'.asc',info_spat%irr_meth_id)
+            call write_grid(trim(path)//"out_am_percI.asc",info_spat%a_perc(1))
+            call write_grid(trim(path)//"out_am_percII.asc",info_spat%a_perc(2))
+            call write_grid(trim(path)//"out_bm_percI.asc",info_spat%b_perc(1))
+            call write_grid(trim(path)//"out_bm_percII.asc",info_spat%b_perc(2))
         case (3)
-            !call write_matrices(trim(path)//'out_'//trim(sim%eff_rete_fn)//'.asc',info_spat%eff_rete,errorflag)! - RR
-            call write_grid(trim(path)//'out_'//trim(sim%id_irr_meth_fn)//'.asc',info_spat%irr_meth_id,errorflag)
-            call write_grid(trim(path)//"out_am_percI.asc",info_spat%a_perc(1),errorflag)
-            call write_grid(trim(path)//"out_am_percII.asc",info_spat%a_perc(2),errorflag)
-            call write_grid(trim(path)//"out_bm_percI.asc",info_spat%b_perc(1),errorflag)
-            call write_grid(trim(path)//"out_bm_percII.asc",info_spat%b_perc(2),errorflag)
+            !call write_matrices(trim(path)//'out_'//trim(sim%eff_rete_fn)//'.asc',info_spat%eff_rete)! - RR
+            call write_grid(trim(path)//'out_'//trim(sim%id_irr_meth_fn)//'.asc',info_spat%irr_meth_id)
+            call write_grid(trim(path)//"out_am_percI.asc",info_spat%a_perc(1))
+            call write_grid(trim(path)//"out_am_percII.asc",info_spat%a_perc(2))
+            call write_grid(trim(path)//"out_bm_percI.asc",info_spat%b_perc(1))
+            call write_grid(trim(path)//"out_bm_percII.asc",info_spat%b_perc(2))
         case (4)
-            call write_grid(trim(path)//'out_'//trim(sim%irr_units_fn)//'.asc',info_spat%irr_unit_id,errorflag)
-            call write_grid(trim(path)//'out_'//trim(sim%eff_irr_fn)//'.asc',info_spat%eff_met,errorflag)
-            call write_grid(trim(path)//'out_'//trim(sim%eff_net_fn)//'.asc',info_spat%eff_net,errorflag)
-            call write_grid(trim(path)//'out_'//trim(sim%id_irr_meth_fn)//'.asc',info_spat%irr_meth_id,errorflag)
-            call write_grid(trim(path)//"out_am_percI.asc",info_spat%a_perc(1),errorflag)
-            call write_grid(trim(path)//"out_am_percII.asc",info_spat%a_perc(2),errorflag)
-            call write_grid(trim(path)//"out_bm_percI.asc",info_spat%b_perc(1),errorflag)
-            call write_grid(trim(path)//"out_bm_percII.asc",info_spat%b_perc(2),errorflag)
+            call write_grid(trim(path)//'out_'//trim(sim%irr_units_fn)//'.asc',info_spat%irr_unit_id)
+            call write_grid(trim(path)//'out_'//trim(sim%eff_irr_fn)//'.asc',info_spat%eff_met)
+            call write_grid(trim(path)//'out_'//trim(sim%eff_net_fn)//'.asc',info_spat%eff_net)
+            call write_grid(trim(path)//'out_'//trim(sim%id_irr_meth_fn)//'.asc',info_spat%irr_meth_id)
+            call write_grid(trim(path)//"out_am_percI.asc",info_spat%a_perc(1))
+            call write_grid(trim(path)//"out_am_percII.asc",info_spat%a_perc(2))
+            call write_grid(trim(path)//"out_bm_percI.asc",info_spat%b_perc(1))
+            call write_grid(trim(path)//"out_bm_percII.asc",info_spat%b_perc(2))
         case default
     end select
 
     !meteo weigths
     do k=1,size(info_spat%weight_ws)
         write(meteo_stringa,*) k
-        call write_grid(trim(path)//trim(adjustl('out_meteo_'//trim(adjustl(meteo_stringa))//'.asc')), &
-            & info_spat%weight_ws(k),errorflag)
+        call write_grid(trim(path)//trim(adjustl('out_meteo_'//trim(adjustl(meteo_stringa))//'.asc')), info_spat%weight_ws(k))
     end do
 
 end subroutine write_init_grids
@@ -1325,6 +1222,8 @@ subroutine init_irrigation_units(domain_map,irr_units_map,eff_net,irr_units_tbl,
 
     rewind(free_unit)                ! Rewind of file to store its content
     read(free_unit,*) str            ! Skip header line
+
+    !%PS%, todo: decide whether n_cells/int_distr_eff/h_irr_mean should include non-irrigable cells (e.g. who have irr_method=0 or whose crop have irrigation_class=0)
     do i = 1, n_irr_units
 !~             read(free_unit,*,iostat=ios)IU(i)%id,IU(i)%f_explore,IU(i)%f_un_priv,IU(i)%wat_shift
         read(free_unit,*,iostat=ios)irr_units_tbl(i)%id,irr_units_tbl(i)%f_explore,irr_units_tbl(i)%f_un_priv
@@ -1340,12 +1239,18 @@ subroutine init_irrigation_units(domain_map,irr_units_map,eff_net,irr_units_tbl,
         ! set n_day max to n_cells
         if (irr_units_tbl(i)%n_day > irr_units_tbl(i)%n_cells) irr_units_tbl(i)%n_day = irr_units_tbl(i)%n_cells
 
-        ! calculate di average network efficiency: SUM(net_eff)/ n_cells
-        irr_units_tbl(i)%int_distr_eff=sum(eff_net%mat, irr_units_map%mat==irr_units_tbl(i)%id .and. domain_map%mat/=domain_map%header%nan)/irr_units_tbl(i)%n_cells
-        ! f2003 compatibility error
-        irr_units_tbl(i)%int_distr_eff=merge(0.d0,irr_units_tbl(i)%int_distr_eff,irr_units_tbl(i)%int_distr_eff/=irr_units_tbl(i)%int_distr_eff)
-        ! calculate the average irrigation height
-        irr_units_tbl(i)%h_irr_mean=sum(h_met%mat,irr_units_map%mat==irr_units_tbl(i)%id .and. domain_map%mat/=domain_map%header%nan)/irr_units_tbl(i)%n_cells
+        if (irr_units_tbl(i)%n_cells > 0) then
+            ! calculate the average network efficiency: SUM(net_eff)/ n_cells
+            irr_units_tbl(i)%int_distr_eff = sum(eff_net%mat, irr_units_map%mat==irr_units_tbl(i)%id .and. &
+                                               & domain_map%mat/=domain_map%header%nan) / irr_units_tbl(i)%n_cells
+            ! calculate the average irrigation height
+            irr_units_tbl(i)%h_irr_mean = sum(h_met%mat, irr_units_map%mat==irr_units_tbl(i)%id .and. &
+                                            & domain_map%mat/=domain_map%header%nan) / irr_units_tbl(i)%n_cells
+        else
+            ! This IU is listed in irr_districts.txt but has no cells in the active domain. Set values to 0 avoiding unsafe math
+            irr_units_tbl(i)%int_distr_eff = 0.0_dp
+            irr_units_tbl(i)%h_irr_mean = 0.0_dp
+        end if
         if(ios/=0)then
             print *, 'Error reading file ', trim(pars%sim%irrdistr_list_fn), ' in line ', i+1, '.'
             print *, 'Expected format: integer real integer. Execution will be aborted...'

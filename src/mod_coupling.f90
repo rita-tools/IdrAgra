@@ -86,7 +86,7 @@ subroutine coupling_handshake(coupling, domain, sim, extent, water_table, minimu
     character(len=500) :: net_perc_path, pumping_path, water_table_path
     character(len=64) :: response_from_coupler, token
     character(len=6) :: period_text
-    integer :: received_index, error_flag, ios
+    integer :: received_index, ios
 
     ! Write the exchange fluxes with the water table to files located in the coupling directory
     coupling%period_index = coupling%period_index + 1
@@ -97,11 +97,11 @@ subroutine coupling_handshake(coupling, domain, sim, extent, water_table, minimu
 
     output_matrix = coupling%net_percolation
     where (domain%mat == domain%header%nan) output_matrix = real(domain%header%nan, dp)
-    call print_mat_as_grid(trim(net_perc_path), domain%header, output_matrix, error_flag)
+    call print_mat_as_grid(trim(net_perc_path), domain%header, output_matrix)
 
     output_matrix = coupling%private_pumping
     where (domain%mat == domain%header%nan) output_matrix = real(domain%header%nan, dp)
-    call print_mat_as_grid(trim(pumping_path), domain%header, output_matrix, error_flag)
+    call print_mat_as_grid(trim(pumping_path), domain%header, output_matrix)
 
     ! Actual handshake with the coupler: after reading this line, the coupler allows MODFLOW to progress
     write(output_unit, '(a,1x,i0,1x,i0)') ready_token, coupling%period_index, coupling%days_in_period

@@ -1,5 +1,5 @@
 module mod_grid
-use mod_constants, only: sp, dp, tabCN
+use mod_constants, only: dp, tabCN
 use mod_utility, only: lower_case
 use mod_parameters, only: simulation, par_method
 implicit none
@@ -154,11 +154,9 @@ subroutine read_grid_r( filename, prm, sim, extent)
     integer :: i
     integer :: free_unit
     integer :: ios ! To check for read errors or end of file
-    integer :: ErrorFlag
     real(dp),dimension(:,:),allocatable::aux_parametro
     character(len=14)::str
 
-    ErrorFlag = 0
     ios=0
 
     ! open the file in read only mode
@@ -223,11 +221,9 @@ subroutine read_grid_i( filename, prm, sim, extent)
     integer :: free_unit
     integer :: ios              ! To check for read errors or end of file
     integer :: ierror           ! %AB% To check for read errors in file content (real instead of integer)
-    integer :: ErrorFlag
     integer,dimension(:,:),allocatable::aux_parametro
     character(len=14)::str
 
-    ErrorFlag = 0
     ios=0
     ierror=0
 
@@ -287,13 +283,11 @@ subroutine read_grid_i( filename, prm, sim, extent)
 
 end subroutine read_grid_i
 
-subroutine write_grid_r( filename, grid, ErrorFlag)
+subroutine write_grid_r(filename, grid)
     ! save real grid in ascii format file *.ASC
    character(len=*), intent(in) ::filename
     type(grid_r),intent(in)::grid
-    integer, intent(out) :: ErrorFlag
     integer :: i, ios, free_unit
-    ErrorFlag = 0
     ios=0
 
     ! exit if filename is empty
@@ -320,14 +314,11 @@ subroutine write_grid_r( filename, grid, ErrorFlag)
 
 end subroutine write_grid_r
 
-subroutine write_grid_i( filename, grid, ErrorFlag)
+subroutine write_grid_i(filename, grid)
     ! save integer grid in ascii format file *.ASC
    character(len=*), intent(in) ::filename
     type(grid_i),intent(in)::grid
-    integer, intent(out) :: ErrorFlag
-
     integer :: i, ios, free_unit
-    ErrorFlag = 0
     ios=0
 
     ! exit if filename is empty
@@ -353,12 +344,11 @@ subroutine write_grid_i( filename, grid, ErrorFlag)
 
 end subroutine write_grid_i
 
-subroutine write_head_and_mat_i(filename,header,mat,errorflag)
+subroutine write_head_and_mat_i(filename, header, mat)
     ! save header and matrix of integers in ascii format file *.ASC
    character(len=*),intent(in)::filename
     integer,dimension(:,:),intent(in)::mat
     type(grid_header_i),intent(in)::header
-    integer,intent(inout)::errorflag
     type(grid_i)::grid
 
     allocate(grid%mat(size(mat,1),size(mat,2)))
@@ -369,16 +359,15 @@ subroutine write_head_and_mat_i(filename,header,mat,errorflag)
     grid%header%y0string = header%y0string
     grid%header%nan = header%nan
     grid%header%cellsize = header%cellsize
-    call write_grid(filename,grid,errorflag)
+    call write_grid(filename, grid)
     deallocate(grid%mat)
 end subroutine write_head_and_mat_i
 
-subroutine write_header_and_mat_r(filename,titolo,matrice,errorflag)
+subroutine write_header_and_mat_r(filename, titolo, matrice)
     ! save header and matrix of reals in ascii format file *.ASC
    character(len=*),intent(in)::filename
     real(dp),dimension(:,:),intent(in)::matrice
     type(grid_header_i),intent(in)::titolo
-    integer,intent(inout)::errorflag
     type(grid_r)::grid
 
     allocate(grid%mat(size(matrice,1),size(matrice,2)))
@@ -389,7 +378,7 @@ subroutine write_header_and_mat_r(filename,titolo,matrice,errorflag)
     grid%header%y0string = titolo%y0string
     grid%header%nan = real(titolo%nan)
     grid%header%cellsize = titolo%cellsize
-    call write_grid(filename,grid,errorflag)
+    call write_grid(filename, grid)
     deallocate(grid%mat)
 end subroutine write_header_and_mat_r
 
@@ -471,28 +460,38 @@ subroutine check_header_r(sim,header_r,file_name)
     end if
 end subroutine check_header_r
 
-subroutine overlay_domain_i(par_grid,domain_grid)
-    ! set par as NAN also where domain is NAN
-    type(grid_i),intent(inout)::domain_grid
-    type(grid_i),intent(out)::par_grid
+subroutine overlay_domain_i(par_grid, domain_grid, par_name)
+    ! Remove cells missing from the parameter map from the active domain (and vice versa)
+    type(grid_i), intent(inout) :: domain_grid
+    type(grid_i), intent(inout) :: par_grid
+    character(len=*), intent(in) :: par_name
 
+    if (any(par_grid%mat==par_grid%header%nan .and. domain_grid%mat/=domain_grid%header%nan)) then
+        print *, "Warning: parameter map '",trim(par_name),"' does not have valid data for the entire active domain;&
+               & the domain will be reduced to cells with valid data."
+    end if
     where(par_grid%mat==par_grid%header%nan) domain_grid%mat=domain_grid%header%nan
     where(domain_grid%mat==domain_grid%header%nan) par_grid%mat=par_grid%header%nan
 end subroutine overlay_domain_i
 
-subroutine overlay_domain_r(par_grid,domain_grid)
-    ! set par as NAN also where domain is NAN
-    type(grid_i),intent(inout)::domain_grid
-    type(grid_r),intent(out)::par_grid
+subroutine overlay_domain_r(par_grid, domain_grid, par_name)
+    ! Remove cells missing from the parameter map from the active domain (and vice versa)
+    type(grid_i), intent(inout) :: domain_grid
+    type(grid_r), intent(inout) :: par_grid
+    character(len=*), intent(in) :: par_name
 
+    if (any(par_grid%mat==par_grid%header%nan .and. domain_grid%mat/=domain_grid%header%nan)) then
+        print *, "Warning: parameter map '",trim(par_name),"' does not have valid data for the entire active domain;&
+               & the domain will be reduced to cells with valid data."
+    end if
     where(par_grid%mat==par_grid%header%nan) domain_grid%mat=domain_grid%header%nan
     where(domain_grid%mat==domain_grid%header%nan) par_grid%mat=par_grid%header%nan
 end subroutine overlay_domain_r
 
 subroutine set_default_par_i(a_grid,domain_grid,default_value)
     ! fill missing value with the value provided by the user - integer
-    type(grid_i),intent(inout)::domain_grid
-    type(grid_i),intent(out)::a_grid
+    type(grid_i),intent(in)::domain_grid
+    type(grid_i),intent(inout)::a_grid
     integer,intent(in)::default_value
 
     where(a_grid%mat==a_grid%header%nan .and. domain_grid%mat/=domain_grid%header%nan) a_grid%mat=default_value
@@ -500,8 +499,8 @@ end subroutine set_default_par_i
 
 subroutine set_default_par_r(a_grid,domain_grid,default_value)
     ! fill missing value with the value provided by the user - real
-    type(grid_i),intent(inout)::domain_grid
-    type(grid_r),intent(out)::a_grid
+    type(grid_i),intent(in)::domain_grid
+    type(grid_r),intent(inout)::a_grid
     real(dp),intent(in)::default_value
 
     where(a_grid%mat==a_grid%header%nan .and. domain_grid%mat/=domain_grid%header%nan) a_grid%mat=default_value
@@ -511,6 +510,7 @@ function id_to_par_r(id_grid,pars_list)
     ! return a matrix of real values
     ! choosing the values from the list provided (pars_list)
     ! base on the position in the list
+    !%PS%: id_grid = 0 returns a value of 0 regardless of pars_list (irr_meth 0 means "not irrigable" and doesn't need actual parameters)
    type(grid_i),intent(in)::id_grid
     real(dp),dimension(:),intent(in)::pars_list
 
@@ -518,7 +518,8 @@ function id_to_par_r(id_grid,pars_list)
     integer::i,j
 
     id_to_par_r=real(id_grid%header%nan)
-    forall(i=1:size(id_grid%mat,1), j=1:size(id_grid%mat,2), id_grid%mat(i,j)/=id_grid%header%nan)
+    where(id_grid%mat==0) id_to_par_r=0.0_dp
+    forall(i=1:size(id_grid%mat,1), j=1:size(id_grid%mat,2), id_grid%mat(i,j)>0)
         id_to_par_r(i,j)=pars_list(id_grid%mat(i,j))
     end forall
 end function id_to_par_r
@@ -527,6 +528,7 @@ function id_to_par_i(id_grid,pars_list)
     ! return a matrix of integer values
     ! choosing the values from the list provided (pars_list)
     ! base on the position in the list
+    !%PS%: id_grid = 0 returns a value of 0 regardless of pars_list (irr_meth 0 means "not irrigable" and doesn't need actual parameters)
    type(grid_i),intent(in)::id_grid
     integer,dimension(:),intent(in)::pars_list
 
@@ -534,7 +536,8 @@ function id_to_par_i(id_grid,pars_list)
     integer::i,j
 
     id_to_par_i=id_grid%header%nan
-    forall(i=1:size(id_grid%mat,1), j=1:size(id_grid%mat,2), id_grid%mat(i,j)/=id_grid%header%nan)
+    where(id_grid%mat==0) id_to_par_i=0
+    forall(i=1:size(id_grid%mat,1), j=1:size(id_grid%mat,2), id_grid%mat(i,j)>0)
         id_to_par_i(i,j)=pars_list(id_grid%mat(i,j))
     end forall
 end function id_to_par_i

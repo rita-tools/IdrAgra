@@ -1,14 +1,15 @@
 module cli_watsources
-use mod_constants, only: sp, dp
-use mod_utility, only: get_value_index, lower_case, calc_doy, split_date
+use mod_constants, only: dp, seconds_per_day
+use mod_date, only: date, split_date, days_between_dates, dates_are_equal
+use mod_utility, only: get_value_index, lower_case
 use mod_parameters
 use mod_grid, only: grid_i, grid_r
-use mod_meteo, only: date, meteo_info
+use mod_meteo, only: meteo_info
 implicit none
 
 contains
 
-subroutine open_daily_discharges_file(file_name,mn_src_tbl,source_nr,error_flag)
+subroutine open_daily_discharges_file(file_name, mn_src_tbl, source_nr)
     ! open the file in the following format
     ! 3     4   ...
     ! 10.0  6.0 ...
@@ -20,7 +21,6 @@ subroutine open_daily_discharges_file(file_name,mn_src_tbl,source_nr,error_flag)
     character(len=*), intent(in) :: file_name
     type(monitored_sources_table),intent(out)::mn_src_tbl
     integer, intent(out) :: source_nr
-    integer, intent(out) :: error_flag
     integer :: i
     integer :: ios = 0
     integer :: n_rows
@@ -29,7 +29,6 @@ subroutine open_daily_discharges_file(file_name,mn_src_tbl,source_nr,error_flag)
     integer:: strlen
     character(len=1),parameter :: delimiter = achar(9)   ! Delimiter: horizontal tab
 
-    error_flag = 0
     open(newunit=mn_src_tbl%unit, file=trim(file_name), status='old', action="read", iostat=ios)
     if (ios /= 0 ) then
         print *, "Cannot open file ", trim(file_name), ". The specified file does not exist. Execution will be aborted..."
@@ -76,16 +75,14 @@ subroutine open_daily_discharges_file(file_name,mn_src_tbl,source_nr,error_flag)
     call split_date(date_string, date_start, date_end)
     call split_date(date_start, mn_src_tbl%start)
     call split_date(date_end, mn_src_tbl%finish)
-    mn_src_tbl%start%doy = calc_doy(mn_src_tbl%start%day, mn_src_tbl%start%month, mn_src_tbl%start%year)
-    mn_src_tbl%finish%doy = calc_doy(mn_src_tbl%finish%day, mn_src_tbl%finish%month, mn_src_tbl%finish%year)
     ! Check if the length of the time series matches the dates limits
-    if (n_rows /= mn_src_tbl%finish%doy - mn_src_tbl%start%doy + 1) then
+    if (n_rows /= days_between_dates(mn_src_tbl%start, mn_src_tbl%finish) + 1) then
         stop "Diversion time series have incoherent lengths with respect to declared dates. Execution will be aborted..."
     end if
 
 end subroutine open_daily_discharges_file
 
-subroutine read_unm_coll_sources_list(file_name, unm_coll_src_tbl, error_flag, n_unm_coll_src, pars)
+subroutine read_unm_coll_sources_list(file_name, unm_coll_src_tbl, n_unm_coll_src, pars)
     ! open the file with the list of unmonitored collective sources (i.e. public wells)
     ! the file must be structured as follow (# are comments):
     ! # SourceWellTotNum: number of public wells
@@ -98,7 +95,6 @@ subroutine read_unm_coll_sources_list(file_name, unm_coll_src_tbl, error_flag, n
    character(len=*), intent(in):: file_name
     type(unmonitored_sources_table),intent(inout)::unm_coll_src_tbl
     type(parameters),intent(inout)::pars
-    integer, intent(out):: error_flag
     integer, intent(out):: n_unm_coll_src
     character(len=300) :: comment, buffer, label
     integer :: ios, p, line, tablestart
@@ -110,7 +106,6 @@ subroutine read_unm_coll_sources_list(file_name, unm_coll_src_tbl, error_flag, n
     n_unm_coll_src = 0
     ios = 0
     line = 0
-    error_flag = 0
     open(newunit=free_unit, file=file_name, action="read", iostat=ios)
     if (ios /= 0) then
         print *, "Error opening file ", file_name, "; iostat = ", ios, &
@@ -146,8 +141,7 @@ subroutine read_unm_coll_sources_list(file_name, unm_coll_src_tbl, error_flag, n
                         tablestart = line
                         do i=1, n_unm_coll_src
                             read (free_unit, *) temp
-                            call read_unm_coll_source_par(trim(pars%sim%watsour_path)//trim(temp),&
-                                                          & unm_coll_src_tbl, error_flag, i, pars)
+                            call read_unm_coll_source_par(trim(pars%sim%watsour_path)//trim(temp), unm_coll_src_tbl, i, pars)
                             line = line + 1
                         end do
                     case ('endlist')
@@ -170,12 +164,11 @@ subroutine read_unm_coll_sources_list(file_name, unm_coll_src_tbl, error_flag, n
     close(free_unit)
 end subroutine read_unm_coll_sources_list
 
-subroutine read_unm_coll_source_par(file_name,unm_col_sour_tbl,error_flag,k,pars)
+subroutine read_unm_coll_source_par(file_name, unm_col_sour_tbl, k, pars)
    character(len=*), intent(in) :: file_name
     integer,intent(in)::k
     type(parameters),intent(inout)::pars
     type(unmonitored_sources_table),intent(out)::unm_col_sour_tbl
-    integer, intent(out) :: error_flag
 
     integer :: i
     integer :: ios = 0
@@ -185,7 +178,6 @@ subroutine read_unm_coll_source_par(file_name,unm_col_sour_tbl,error_flag,k,pars
     integer :: p
 
     ! open the file
-    error_flag = 0
     open(newunit=unm_col_sour_tbl%unit(k), file=trim(file_name), status='old', action="read", iostat=ios)
     if( ios /= 0 ) then
         print *, "Error opening file '", trim(file_name), "'; iostat=", ios
@@ -276,11 +268,9 @@ subroutine open_scheduled_irrigation(file_name,sch_irr,debug)
    character(len=*), intent(in) :: file_name
     logical, intent(in):: debug
     type(scheduled_irrigation),dimension(:),allocatable,intent(out)::sch_irr
-    integer :: error_flag
     integer :: i,n_rec,free_unit
     integer :: ios
 
-    error_flag = 0
     ios=0
 
     ! open the file
@@ -312,7 +302,7 @@ subroutine open_scheduled_irrigation(file_name,sch_irr,debug)
 
 end subroutine open_scheduled_irrigation
 
-subroutine read_water_sources_table(wat_sour_tbl_fn, wat_sour_tbl, error_flag)
+subroutine read_water_sources_table(wat_sour_tbl_fn, wat_sour_tbl)
     ! Read the list of water sources for each irrigation units.
     ! Each sources have an id, a type and the release ratio
     ! The shape of the file must be:
@@ -322,7 +312,6 @@ subroutine read_water_sources_table(wat_sour_tbl_fn, wat_sour_tbl, error_flag)
     !   ...
     character(len=*), intent(in):: wat_sour_tbl_fn
     type(water_sources_table), dimension(:), allocatable,intent(inout) :: wat_sour_tbl
-    integer, intent(out) :: error_flag
 
     integer :: i, free_unit
     integer :: ios = 0
@@ -333,7 +322,6 @@ subroutine read_water_sources_table(wat_sour_tbl_fn, wat_sour_tbl, error_flag)
     ! open the file
     open(newunit=free_unit, file=trim(wat_sour_tbl_fn), status='old', action="read", iostat=ios)
     if(ios /= 0) then
-        error_flag=1
         print *, "Error opening file '", trim(wat_sour_tbl_fn), "'; iostat=", ios, &
             & '. Execution will be aborted...'
         stop
@@ -382,10 +370,9 @@ subroutine init_water_sources_duty(pars,wat_src_tbl,src_info,weather_info)
     type(source_info),intent(inout)::src_info
     type(meteo_info),dimension(:),intent(in)::weather_info
 
-    integer::error_flag
     integer::i
 
-    call read_water_sources_table(trim(pars%sim%watsour_path)//trim(pars%sim%watsources_fn), wat_src_tbl, error_flag)
+    call read_water_sources_table(trim(pars%sim%watsour_path)//trim(pars%sim%watsources_fn), wat_src_tbl)
 
     nullify(src_info%mn_src_tbl1%q_daily)
     nullify(src_info%mn_src_tbl2%q_daily)
@@ -393,51 +380,52 @@ subroutine init_water_sources_duty(pars,wat_src_tbl,src_info,weather_info)
 
     if(pars%ms_i%f_exists .eqv. .true.)then
         call open_daily_discharges_file(trim(pars%sim%watsour_path)//trim(pars%sim%mon_sources_i_div_fn),src_info%mn_src_tbl1, &
-            & pars%ms_i%n_withdrawals,error_flag)
+            & pars%ms_i%n_withdrawals)
         ! Check dates match weather data
-        if (src_info%mn_src_tbl1%start%doy /= weather_info(1)%start%doy) then
+        if (.not. dates_are_equal(src_info%mn_src_tbl1%start, weather_info(1)%start)) then
             stop 'Meteorological and monitored sources (i) time series start in different days'
-        else if (src_info%mn_src_tbl1%finish%doy /= weather_info(1)%finish%doy) then
+        else if (.not. dates_are_equal(src_info%mn_src_tbl1%finish, weather_info(1)%finish)) then
             stop 'Meteorological and monitored sources (i) time series end in different days'
         end if
     end if
 
     if(pars%ms_ii%f_exists .eqv. .true.)then
         call open_daily_discharges_file(trim(pars%sim%watsour_path)//trim(pars%sim%mon_sources_ii_div_fn),src_info%mn_src_tbl2, &
-            & pars%ms_ii%n_withdrawals,error_flag)
+            & pars%ms_ii%n_withdrawals)
         if (pars%ms_i%f_exists .eqv. .true.) then ! check dates match between different monitored water sources
-            if (src_info%mn_src_tbl1%start%doy /= src_info%mn_src_tbl2%start%doy) then
+            if (.not. dates_are_equal(src_info%mn_src_tbl1%start, src_info%mn_src_tbl2%start)) then
                 stop 'monitored sources (i) and monitored sources (ii) time series start in different days'
-            else if (src_info%mn_src_tbl1%finish%doy /= src_info%mn_src_tbl2%finish%doy) then
+            else if (.not. dates_are_equal(src_info%mn_src_tbl1%finish, src_info%mn_src_tbl2%finish)) then
                 stop 'monitored sources (i) and monitored sources (ii) series end in different days'
             end if
         else  ! Check dates match weather data
-            if (src_info%mn_src_tbl2%start%doy /= weather_info(1)%start%doy) then
+            if (.not. dates_are_equal(src_info%mn_src_tbl2%start, weather_info(1)%start)) then
                 stop 'Meteorological and monitored sources (ii) time series start in different days'
-            else if (src_info%mn_src_tbl2%finish%doy /= weather_info(1)%finish%doy) then
+            else if (.not. dates_are_equal(src_info%mn_src_tbl2%finish, weather_info(1)%finish)) then
                 stop 'Meteorological and monitored sources (ii) time series end in different days'
             end if
         end if
     end if
 
     if(pars%intreu%f_exists .eqv. .true.)then
-        call open_daily_discharges_file(trim(pars%sim%watsour_path)//trim(pars%sim%int_reuse_div_fn),src_info%int_reuse_tbl,pars%intreu%n_withdrawals,error_flag)
+        call open_daily_discharges_file(trim(pars%sim%watsour_path)//trim(pars%sim%int_reuse_div_fn), &
+            src_info%int_reuse_tbl, pars%intreu%n_withdrawals)
         if (pars%ms_ii%f_exists .eqv. .true.) then ! Check dates match monitored water sources 2
-            if (src_info%mn_src_tbl2%start%doy /= src_info%int_reuse_tbl%start%doy) then
+            if (.not. dates_are_equal(src_info%mn_src_tbl2%start, src_info%int_reuse_tbl%start)) then
                 stop 'monitored sources (ii) and internal reuse time series start in different days'
-            else if (src_info%mn_src_tbl2%finish%doy /= src_info%int_reuse_tbl%finish%doy) then
+            else if (.not. dates_are_equal(src_info%mn_src_tbl2%finish, src_info%int_reuse_tbl%finish)) then
                 stop 'monitored sources (ii) and internal reuse time series end in different days'
             end if
         else if (pars%ms_i%f_exists .eqv. .true.) then ! Check dates match monitored water sources 1
-            if (src_info%mn_src_tbl1%start%doy /= src_info%int_reuse_tbl%start%doy) then
+            if (.not. dates_are_equal(src_info%mn_src_tbl1%start, src_info%int_reuse_tbl%start)) then
                 stop 'monitored sources (i) and internal reuse time series start in different days'
-            else if (src_info%mn_src_tbl1%finish%doy /= src_info%int_reuse_tbl%finish%doy) then
+            else if (.not. dates_are_equal(src_info%mn_src_tbl1%finish, src_info%int_reuse_tbl%finish)) then
                 stop 'monitored sources (i) and internal reuse time series end in different days'
             end if
         else ! Check dates match weather data
-            if (src_info%int_reuse_tbl%start%doy /= weather_info(1)%start%doy) then
+            if (.not. dates_are_equal(src_info%int_reuse_tbl%start, weather_info(1)%start)) then
                 stop 'Meteorological and internal reuse time series start in different days'
-            else if (src_info%int_reuse_tbl%finish%doy /= weather_info(1)%finish%doy) then
+            else if (.not. dates_are_equal(src_info%int_reuse_tbl%finish, weather_info(1)%finish)) then
                 stop 'Meteorological and internal reuse time series end in different days'
             end if
         end if
@@ -445,7 +433,7 @@ subroutine init_water_sources_duty(pars,wat_src_tbl,src_info,weather_info)
 
     if(pars%cr%f_exists .eqv. .true.)then
         call read_unm_coll_sources_list(trim(pars%sim%watsour_path)//trim(pars%sim%cr_sources_list_fn), src_info%unm_src_tbl, &
-            & error_flag, pars%cr%n_withdrawals, pars)
+            & pars%cr%n_withdrawals, pars)
     end if
 
     ! Assign column index to each water sources
@@ -513,8 +501,8 @@ subroutine nom_water_supply(watsources_fn, irr_units, src_info, wat_src_tbl, f_s
     real(dp),dimension(:,:),intent(in)::shape_area
     integer,dimension(:,:),intent(in)::irr_unit_map
     logical,intent(in)::verbose
-    integer,parameter::sec_to_day=24*60*60  ![s/d]
     integer::i,j,k
+    real(dp) :: avg_cell_area
 
     irr_units%q_nom = 0
     irr_units(:)%q_pot_fld(1) = 0
@@ -538,26 +526,27 @@ subroutine nom_water_supply(watsources_fn, irr_units, src_info, wat_src_tbl, f_s
                 print *,"File", trim(watsources_fn), " lists a source type that is not codified: ", wat_src_tbl(i)%type_id
         end select
     end do
-    ! total potential water discharge [m3/s]
+
+    ! Total potential water discharge [m3/s]
     irr_units%q_nom = irr_units%q_pot_fld(1) + irr_units%q_pot_fld(2) + irr_units%q_pot_fld(3) + irr_units%q_pot_fld(4)
-    ! TODO: shapearea
-    if (f_shapearea .eqv. .false.) then
-        !irr_units%n_irrigable_cells = irr_units%q_nom*sec_to_day / (1.e-3*irr_units%h_irr_mean*cell_size**2)
-        do i=1, size(irr_units)
-            if ((1.e-3* irr_units(i)%h_irr_mean *cell_size**2)>0.)then
-                irr_units(i)%n_irrigable_cells = irr_units(i)%q_nom * sec_to_day / &
-                                                & (1.e-3* irr_units(i)%h_irr_mean *cell_size**2)
+
+    ! Average number of irrigable cells per day
+    irr_units(:)%n_irrigable_cells = 0._dp
+    do i=1, size(irr_units)
+        if (irr_units(i)%n_cells <= 0) then
+            print *, "Irrigation unit ", irr_units(i)%id, " is outside the active domain."
+        else if (irr_units(i)%h_irr_mean > 0._dp) then
+            if (f_shapearea) then
+                avg_cell_area = sum(shape_area, irr_unit_map == irr_units(i)%id) / irr_units(i)%n_cells
             else
-                print *,"No irrigation required in irrigation unit: ", irr_units(i)%id, " h_irr_mean: ",irr_units(i)%h_irr_mean
-                irr_units(i)%n_irrigable_cells = 0.
+                avg_cell_area = cell_size**2
             end if
-        end do
-    else
-        do i=1, size(irr_units)
-            irr_units(i)%n_irrigable_cells = irr_units(i)%q_nom * sec_to_day / &
-                                           & (1.e-3* irr_units(i)%h_irr_mean * sum(shape_area, irr_unit_map == irr_units(j)%id))
-        end do
-    end if
+            irr_units(i)%n_irrigable_cells = irr_units(i)%q_nom * seconds_per_day / &
+                                             (1.e-3 * irr_units(i)%h_irr_mean * avg_cell_area)
+        else
+            print *, "Irrigation unit ", irr_units(i)%id, " contains no irrigable cells. h_irr_mean: ", irr_units(i)%h_irr_mean
+        end if
+    end do
 
     ! TODO: save as CSV file
     if (verbose .eqv. .true.) then

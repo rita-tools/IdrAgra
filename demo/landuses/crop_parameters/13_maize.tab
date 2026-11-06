@@ -1,0 +1,49 @@
+# maize_class_600_FAO
+SowingDate_min	= 91	# minimum sowing date (1-366)
+SowingDelay_max	= 14	# maximum number of days allowed for sowing after SowingDate_min
+HarvestDate_max	= 274	# maximum harvest date (1-366)
+HarvNum_max	= 1	# maximum number of harvest/cuts per the year
+CropsOverlap	= 7 	# minimum number of days between two subsequent crops in case of double cropping
+Tsowing		= 9.0 	# minimum sowing temperature [°C]
+Tdaybase	= 10.0     # minimum temperature for crop growth [°C]
+Tcutoff		= 32.0 	# maximum temperature for crop growth [°C]
+Vern		= 0 	# response to vernalization [1=Yes, 0=No]
+Tv_min		= 3.0 	# minimum temperature for optimal vernalization [°C]
+Tv_max		= 10.0 	# maximum temperature for optimal vernalization [°C]
+VFmin		= 0.0 	# vernalization factor at the beginning of the vernalization process [-]
+Vstart		= 10 	# number of days required for vernalization to start
+Vend		= 50 	# number of days required for vernalization to end
+Vslope		= 7.0 	# vernalization curve parameter
+ph_r		= 0 	# photoperiod impact [0=Day-neutral plants, 1=Long-day plants, 2=Short-day plants]
+daylength_if	= 8 	# day length threshold below (above) which no accumulation of physiological time occurs for long-day (short-day) crops
+daylength_ins	= 20 	#  day length threshold above (below) which maximum accumulation of physiological time occurs for long-day (short-day) crops
+WP              = 0.334  # biomass water productivity [t/ha] (C4 crops = 0.30 - 0.35, C3 crops = 0.15 - 0.20, some leguminous crops < 0.15 t/ha)
+fsink           = 0.1   # crop sink strength coefficient
+Tcrit_HS        = 32.0   # critical temperature threshold for heat stress [°C] 
+Tlim_HS         = 40.0    # limit temperature threshold for heat stress[°C] 
+HI              = 0.45  # harvest index
+kyT		= 1.25 	# water stress coefficient for the overall crop growth cycle 
+ky1		= 0.4 	# water stress coefficient for the ini stage 
+ky2		= 0.9 	# water stress coefficient for the dev stage 
+ky3		= 1.5 	# water stress coefficient for the mid stage
+ky4		= 0.5 	# water stress coefficient for the end stage
+pRAW		= 0.5 	# parameter to compute RAW
+aInterception	= 0.6 	# parameter to calculate interception
+cl_CN		= 2 	# CN class
+Irrigation	= 1     # irrigation (1 = Yes, 0 = No)
+
+# Add here extra option(s)
+KcbCorrectionStart = 01/08
+KcbCorrectionEnd = 15/09
+
+
+
+# table of GDD [°C], Kcb [-], LAI [-], crop height [m], root depth [m]; missing values are entered as * 
+GDD	Kcb 	LAI	Hc 	Sr	CN	fc	r_stress	Ky
+35	0	0	0	0.3	*	*	1	*   
+40	0.15	0.05	0.02	0.3	*	*	1	*
+170	0.15	0.5	0.6	0.5	*	*	1	*
+650	1.05	5.2	3	0.85	*	*	0	*
+1400	1.05	4.7	3	0.85	*	*	0	*
+1720	0.15	3.7	2.5	0.85	*	*	0	*
+endTable

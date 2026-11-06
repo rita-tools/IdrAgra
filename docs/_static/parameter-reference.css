@@ -1,0 +1,217 @@
+/* A lower-contrast palette for long reference-reading sessions. */
+body,
+body[data-theme="light"] {
+  --color-background-primary: #f7f7f4;
+  --color-background-secondary: #efefeb;
+  --color-foreground-primary: #454a4f;
+  --color-foreground-secondary: #5d6369;
+  --color-foreground-muted: #6b7278;
+  --color-brand-primary: #607b7e;
+  --color-brand-content: #526f73;
+}
+
+/* Only H2 sections explicitly marked in Markdown join the reference box. */
+.parameter-list-group {
+  border-left: 1px solid color-mix(in srgb, var(--color-foreground-muted) 28%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--color-foreground-muted) 28%, transparent);
+  padding: 0 1rem;
+}
+
+.parameter-list-first {
+  border-radius: 0.45rem 0.45rem 0 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-foreground-muted) 28%, transparent);
+  margin-top: 1.5rem;
+}
+
+.parameter-list-last {
+  border-bottom: 1px solid color-mix(in srgb, var(--color-foreground-muted) 28%, transparent);
+  border-radius: 0 0 0.45rem 0.45rem;
+  margin-bottom: 2rem;
+}
+
+.parameter-list-group + .parameter-list-group {
+  border-top: 1px solid color-mix(in srgb, var(--color-foreground-muted) 24%, transparent);
+}
+
+.parameter-list-group > h2 {
+  background: color-mix(in srgb, var(--color-background-secondary) 72%, transparent);
+  font-size: 1.05rem;
+  margin: 0 -1rem;
+  padding: 0.65rem 1rem;
+}
+
+.parameter-list-group > section {
+  padding: 0.15rem 0.15rem 0.65rem;
+}
+
+.parameter-list-group > section + section {
+  border-top: 1px solid color-mix(in srgb, var(--color-foreground-muted) 18%, transparent);
+}
+
+/* Keep metadata separate from the heading's anchor and navigation label. */
+#furo-main-content section:has(> :is(h3, h4) + .parameter-summary) {
+  column-gap: 1.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+}
+
+#furo-main-content section:has(> :is(h3, h4) + .parameter-summary) > :is(h3, h4) {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+#furo-main-content section:has(> :is(h3, h4) + .parameter-summary) > .parameter-summary {
+  align-self: center;
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+}
+
+#furo-main-content section:has(> :is(h3, h4) + .parameter-summary) > :not(h3):not(h4):not(.parameter-summary) {
+  grid-column: 1 / -1;
+}
+
+.parameter-dependent {
+  background: color-mix(in srgb, var(--color-background-secondary) 42%, transparent);
+  border-radius: 0.3rem;
+  margin-left: 1.25rem;
+  padding: 0.05rem 0.65rem 0.45rem;
+}
+
+.parameter-dependent + .parameter-dependent {
+  margin-top: 0.3rem;
+}
+
+.parameter-dependent > h4 {
+  font-size: 0.95rem;
+}
+
+.parameter-summary {
+  color: var(--color-foreground-muted);
+  font-size: 0.825rem;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.parameter-summary p {
+  margin: 0;
+}
+
+.parameter-summary strong {
+  color: var(--color-brand-content);
+  font-weight: 600;
+}
+
+.parameter-summary--required {
+  background: rgba(143, 91, 72, 0.075);
+  border-radius: 0.35rem;
+  color: #805f55;
+  padding: 0.32rem 0.58rem;
+}
+
+.parameter-summary--required strong {
+  color: #8b5d50;
+  font-weight: 650;
+}
+
+/* Review markers for prose drafted from the manuals with LLM assistance. */
+.llm-review-note,
+.manual-code-divergence {
+  border-left: 0.3rem solid;
+  border-radius: 0.35rem;
+  margin: 1rem 0 1.4rem;
+  padding: 0.75rem 1rem;
+}
+
+.llm-review-note {
+  background: #fff4d6;
+  border-color: #c77900;
+  color: #714b00;
+}
+
+.manual-code-divergence {
+  background: #ffebe9;
+  border-color: #cf222e;
+  color: #7d1a22;
+}
+
+.llm-review-note p,
+.manual-code-divergence p {
+  margin: 0.25rem 0;
+}
+
+body[data-theme="dark"] {
+  --color-background-primary: #202220;
+  --color-background-secondary: #292b28;
+  --color-foreground-primary: #c8cac6;
+  --color-foreground-secondary: #b3b6b1;
+  --color-foreground-muted: #a1a69f;
+  --color-brand-primary: #8fa9ab;
+  --color-brand-content: #91abad;
+}
+
+body[data-theme="dark"] .parameter-summary--required {
+  background: rgba(177, 117, 94, 0.11);
+  color: #c9a59a;
+}
+
+body[data-theme="dark"] .parameter-summary--required strong {
+  color: #d0a093;
+}
+
+body[data-theme="dark"] .llm-review-note {
+  background: #3c3018;
+  border-color: #d29922;
+  color: #f2cc60;
+}
+
+body[data-theme="dark"] .manual-code-divergence {
+  background: #3d2023;
+  border-color: #f85149;
+  color: #ffb3ad;
+}
+
+@media (prefers-color-scheme: dark) {
+  body:not([data-theme="light"]) {
+    --color-background-primary: #202220;
+    --color-background-secondary: #292b28;
+    --color-foreground-primary: #c8cac6;
+    --color-foreground-secondary: #b3b6b1;
+    --color-foreground-muted: #a1a69f;
+    --color-brand-primary: #8fa9ab;
+    --color-brand-content: #91abad;
+  }
+
+  body:not([data-theme="light"]) .parameter-summary--required {
+    background: rgba(177, 117, 94, 0.11);
+    color: #c9a59a;
+  }
+
+  body:not([data-theme="light"]) .parameter-summary--required strong {
+    color: #d0a093;
+  }
+
+  body:not([data-theme="light"]) .llm-review-note {
+    background: #3c3018;
+    border-color: #d29922;
+    color: #f2cc60;
+  }
+
+  body:not([data-theme="light"]) .manual-code-divergence {
+    background: #3d2023;
+    border-color: #f85149;
+    color: #ffb3ad;
+  }
+}
+
+/* Long names and metadata stack cleanly instead of colliding. */
+@media (max-width: 60rem) {
+  #furo-main-content section:has(> :is(h3, h4) + .parameter-summary) {
+    display: block;
+  }
+
+  .parameter-summary {
+    margin: -0.35rem 0 0.9rem;
+    white-space: normal;
+  }
+}

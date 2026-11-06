@@ -1,5 +1,5 @@
 module mod_crop_soil_water
-use mod_constants, only: sp, dp
+use mod_constants, only: dp
 use mod_evapotranspiration
 implicit none
 
@@ -257,7 +257,7 @@ end subroutine water_balance_evap_lay
 
 ! TODO: %AB%: check consistency between water_balance_eva_lay and  water_balance_transp_lay
 recursive subroutine water_balance_transp_lay(h_soil2, h_transp_act, h_transp_pot, h_perc2, &
-    & h_perc1, k_stress_dry, k_stress_sat, hks, h_eva_pot, h_caprise, h_rise, sr, zr, rf_t, k_cb, p_day, cn_group, h_et0,h_sat,h_fc,h_wp,h_r, k_sat, &
+    & h_perc1, k_stress_dry, k_stress_sat, hks, h_eva_pot, h_caprise, h_rise, sr, zr, rf_t, k_cb, p_day, h_et0,h_sat,h_fc,h_wp,h_r, k_sat, &
     & fatt_n, a3 , a4 , b1 , b2, b3, b4, depth_under_rz, &
     & n_iter2, adj_perc_par,caprise_flag,mmax,doy)
     ! water balance of the evapotranspirative layer
@@ -270,7 +270,6 @@ recursive subroutine water_balance_transp_lay(h_soil2, h_transp_act, h_transp_po
     real(dp), intent(in)::k_cb          ! base crop coefficient [-]
     real(dp), intent(in)::p_day         ! deplection fraction adjusted for meteorological conditions [-]
     real(dp), intent(in)::rf_t          ! fraction of active roots in transpirative layer [mm]
-    integer,  intent(in)::cn_group      ! CN group (actually, not CN value!)
     real(dp), intent(in)::h_sat         ! water storage at saturation [mm]
     real(dp), intent(in)::h_fc          ! water storage at field capacity [mm]
     real(dp), intent(in)::h_wp          ! water storage at wilting point [mm]
@@ -326,9 +325,10 @@ recursive subroutine water_balance_transp_lay(h_soil2, h_transp_act, h_transp_po
 
         call transpiration(k_cb,rf_t, h_transp_act, h_transp_pot, hks, h_et0)
 
-        ! %AB%: calculate capillary rise if required (only during growing season and not rice paddy)
+        ! %AB%: calculate capillary rise if required
         ! TODO: %CG%: add transpiration from the 1st layer
-        if ((caprise_flag .eqv. .true.) .and. (k_cb/=0.) .and. (cn_group/=7)) then
+        !%PS%: allowed caprise for rice paddies (it doesn't compromise percolation because cap_rise() returns 0 for very wet soil, and can be helpful when irrigation is turned off)
+        if (caprise_flag .and. k_cb > 0._dp) then
             h_caprise = cap_rise(sr, depth_under_rz, &
                 & h_soil_mean/(zr*1000), h_fc/(zr*1000), h_wp/(zr*1000), &
                 & k_cb * h_et0, h_eva_pot, &   ! replace with total transpiration & h_transp_pot, h_eva_pot,&
@@ -353,10 +353,10 @@ recursive subroutine water_balance_transp_lay(h_soil2, h_transp_act, h_transp_po
         if (h_soil_new >= h_sat) then
             h_rise = h_soil_new - h_sat   ! excess water moves upward
             h_soil_new = h_sat
-        else if (h_soil_new <= h_wp)then
-            ! limit percolation in order to not go under wilting point
-            h_perc2 = h_perc2 + (h_soil_new-h_wp)
-            h_soil_new = h_wp
+        else if (h_soil_new <= h_r) then
+            ! limit percolation in order to not go under wilting point %PS%: changed to residual
+            h_perc2 = h_perc2 + (h_soil_new - h_r)
+            h_soil_new = h_r
         end if
 
         ! convergence of the solution
@@ -383,7 +383,7 @@ recursive subroutine water_balance_transp_lay(h_soil2, h_transp_act, h_transp_po
         n = 0
         do k = 1, kmax
             call water_balance_transp_lay(h_soil2, h_transp_act_m, h_transp_pot_m, h_perc2_m, h_perc1/kmax,k_s_dry_m,k_s_sat_m, hks_m, h_eva_pot/kmax, h_caprise_m, &
-                & h_rise_m, sr, zr, rf_t, k_cb, p_day, cn_group, h_et0/kmax, h_sat,h_fc,h_wp,h_r, k_sat/kmax, fatt_n, &
+                & h_rise_m, sr, zr, rf_t, k_cb, p_day, h_et0/kmax, h_sat,h_fc,h_wp,h_r, k_sat/kmax, fatt_n, &
                 & a3 , a4 , b1 , b2 , b3, b4 , depth_under_rz, n_iter2, adj_perc_par,caprise_flag,mmax,doy)
             ! %AB%: save all the variable
             h_caprise = h_caprise + h_caprise_m

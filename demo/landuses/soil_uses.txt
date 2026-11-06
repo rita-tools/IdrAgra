@@ -1,0 +1,10 @@
+# Compact crop-rotation database; fields are tab-separated
+Cr_ID	Crop1			Crop2		# Comments
+1	2_autumn-sow.tab	*		# Winter wheat
+2	13_maize.tab		*		# Maize
+3	2_autumn-sow.tab	13_maize.tab	# Winter wheat -> maize
+4	33_cover_crop.tab	13_maize.tab	# Cover crop -> maize
+5	34_soybean.tab		*		# second-crop soybean
+6	27_tomato.tab		*		# Tomato
+7	12_orchard.tab		*		# Mixed orchard
+endTable

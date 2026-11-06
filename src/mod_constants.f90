@@ -2,7 +2,7 @@ module mod_constants
 implicit none
 
 ! Symbolic names for kind types of single- and double-precision reals
-integer, parameter :: sp = kind(1.0)
+!integer, parameter :: sp = kind(1.0)
 integer, parameter :: dp = kind(1.0D0)
 
 ! set default NAN values
@@ -10,57 +10,6 @@ integer, parameter :: nan_i = -9999
 real(dp), parameter :: nan_r = -9999.0
 
 real(dp), parameter :: cost_fwEva = 1 ! default fwEvaporation
-real(dp),dimension(24),parameter :: cost_f_eff_rain = &
-    &   (/1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0,&
-    &     1.0/24.0/)
-real(dp),dimension(24),parameter :: cost_fet0 =  &
-    &   (/0.001784677,&
-    &     0.001640849,&
-    &     0.002308392,&
-    &     0.002801005,&
-    &     0.002505317,&
-    &     0.001244509,&
-    &     0.00546749,&
-    &     0.018271901,&
-    &     0.04046744,&
-    &     0.074224044,&
-    &     0.108566773,&
-    &     0.140097667,&
-    &     0.166536044,&
-    &     0.166524601,&
-    &     0.122840875,&
-    &     0.072098911,&
-    &     0.038270891,&
-    &     0.015545331,&
-    &     0.006179273,&
-    &     0.004320957,&
-    &     0.002402308,&
-    &     0.002143947,&
-    &     0.001850866,&
-    &     0.001905931/)
-
 real(dp),dimension(24),parameter :: cost_hrs =  (/1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24/)
 
 ! %EAC%: add CN values for 72% impervious area
@@ -96,4 +45,7 @@ integer, dimension(12), parameter:: tmin_time = &
 real(dp), parameter :: pi= acos(-1.)
 
 real(dp), parameter :: res_canopy_std = 70.                 ! Standard canopy resistance (alfalfa) for ET0 calculation
+
+integer, parameter :: seconds_per_day = 24 * 60 * 60
+
 end module mod_constants

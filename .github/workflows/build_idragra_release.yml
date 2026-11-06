@@ -40,16 +40,29 @@ jobs:
           Copy-Item demo $packageDir/demo -Recurse
           Compress-Archive -Path "$packageDir/*" -DestinationPath $zipPath -Force
 
-      - name: Create GitHub release
+      - name: Create or update GitHub release
         shell: pwsh
         run: |
-          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $tag = $env:GITHUB_REF_NAME
+          $version = $tag.TrimStart('v')
 
-          gh release create $env:GITHUB_REF_NAME `
-            release/*_release.exe `
-            release/*_debug.exe `
-            release/*.zip `
-            --title "IdrAgra $version" `
-            --generate-notes
+          gh release view $tag *> $null
+          $releaseExists = $LASTEXITCODE -eq 0
+
+          if ($releaseExists) {
+            gh release upload $tag `
+              release/*_release.exe `
+              release/*_debug.exe `
+              release/*.zip `
+              --clobber
+          }
+          else {
+            gh release create $tag `
+              release/*_release.exe `
+              release/*_debug.exe `
+              release/*.zip `
+              --title "IdrAgra $version" `
+              --generate-notes
+          }
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
