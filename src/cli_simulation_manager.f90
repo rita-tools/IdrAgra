@@ -49,6 +49,7 @@ subroutine simulation_manager(pars, info_spat, wat_src_tbl, info_sources, info_m
 
     type(balance_matrices) :: bal, bal_old
     type(crop_pars_matrices)::pheno
+    type(grid_i) :: crop_map
     type(crop_weather_series), allocatable :: crop_weather(:)
     type(meteo_mat)::meteo
     real(dp),dimension(info_spat%domain%header%imax,info_spat%domain%header%jmax)::out_cn_day
@@ -93,6 +94,7 @@ subroutine simulation_manager(pars, info_spat, wat_src_tbl, info_sources, info_m
     type(grid_r)::pheno_grd
 
     pheno_grd = info_spat%domain
+    crop_map = info_spat%domain; crop_map%mat = 0
 
     ! init irrigation time limits
     info_spat%irr_starts = info_spat%domain
@@ -272,6 +274,16 @@ subroutine simulation_manager(pars, info_spat, wat_src_tbl, info_sources, info_m
             ! Tries importing updated water table data into info_spat%wtab
             if (pars%sim%f_cap_rise) call update_water_table(pars, info_spat, boundaries, y, doy)
 
+            if (pars%sim%read_crop_maps) then
+                call update_crop_map(pars, crop_map, info_spat%domain, boundaries, crops, y, doy)
+                ! Finalize yesterday's crop before replacing it
+                where (info_spat%domain%mat /= info_spat%domain%header%nan)
+                    pheno%harvest_pending = pheno%crop_id > 0 .and. crop_map%mat /= pheno%crop_id
+                end where
+                call finalize_harvested_yield(crop_yield_state, yield, pheno%harvest_pending,     &
+                                            & crops, pars%sim%co2_conc(year_idx), info_spat%domain)
+            end if
+
             call init_step_output_file(stp_map, pars%sim%path, itoa(y), doy, out_steps,                   &
                                      & days_before_1st_interval, first_simulated_doy, step_label, pars%sim)
             call init_step_debug_output_file(deb_map, pars%sim%path, itoa(y), doy, out_steps,                   &
@@ -285,9 +297,10 @@ subroutine simulation_manager(pars, info_spat, wat_src_tbl, info_sources, info_m
                                      & doy, pars%sim%res_canopy(year_idx), pars%sim                  )
 
             ! Advance each cell's crop phenology according to today's GDD accumulation and sow/harvest rules
-            call advance_crops_daily(pheno, crops, bare_soil, crop_rotations, info_spat%domain, info_spat%soil_use_id, &
-                                   & info_spat%irandom%mat, meteo, kcb_corr_fact, dir_meteo, meteo_weight,             &
-                                   & pars%sim%interpolate_temp, crop_weather, current, pars%sim%aggressive_sowing      )
+            call advance_crops_daily(pheno, crops, bare_soil, crop_rotations, info_spat%domain,                  &
+                                   & info_spat%soil_use_id, pars%sim%read_crop_maps, crop_map,                   &
+                                   & info_spat%irandom%mat, meteo, kcb_corr_fact, dir_meteo, meteo_weight,       &
+                                   & pars%sim%interpolate_temp, crop_weather, current, pars%sim%aggressive_sowing)
 
             call start_yield_for_new_crops(crop_yield_state, pheno, info_spat%domain)
 
@@ -717,7 +730,8 @@ subroutine simulation_manager(pars, info_spat, wat_src_tbl, info_sources, info_m
             !wat_bal1%h_pond = wat_bal_hour%esten%h_pond
 
             call accumulate_daily_yield(crop_yield_state, pheno, crops, meteo, bal, info_spat%domain)
-            call finalize_harvested_yield(crop_yield_state, yield, pheno, crops, pars%sim%co2_conc(year_idx), info_spat%domain)
+            call finalize_harvested_yield(crop_yield_state, yield, pheno%harvest_pending,     &
+                                        & crops, pars%sim%co2_conc(year_idx), info_spat%domain)
 
             call write_daily_output (doy, meteo, info_meteo, pheno, h_irr_sum, bal, bal_old, info_spat,               &
                                    & pars, wat, wat_bal_hour, fw_day, fw_old, esp_perc, out_cn, out_cn_day, h_bypass, &
@@ -1031,6 +1045,44 @@ subroutine update_water_table(pars, info_spat, boundaries, year, doy)
         info_spat%wat_tab%mat = pars%depth%ze_fix
     end where
 end subroutine update_water_table
+
+subroutine update_crop_map(pars, crop_map, domain, boundaries, crops, year, doy)
+    type(parameters), intent(in) :: pars
+    type(grid_i), intent(inout) :: crop_map
+    type(grid_i), intent(in) :: domain
+    type(bound), intent(in) :: boundaries
+    type(crop_definition), intent(in) :: crops(:)
+    integer, intent(in) :: year, doy
+    character(len=255) :: file
+    logical :: file_exists
+    integer :: i, j, crop_id
+
+    file = trim(pars%sim%input_path)//'crop_id_'//itoa(year)//'_'//itoa(doy)//'.asc'
+    inquire(file=trim(file), exist=file_exists)
+    if (.not. file_exists) return ! A missing file maintains the previously read map
+
+    print *, 'Reading updated crop ID data from: ', trim(file)
+    call read_grid(trim(file), crop_map, pars%sim, boundaries)
+
+    do j = 1, size(crop_map%mat, 2)
+        do i = 1, size(crop_map%mat, 1)
+            if (domain%mat(i,j) == domain%header%nan) cycle
+            crop_id = crop_map%mat(i,j)
+            if (crop_id < 0 .or. crop_id > size(crops)) then
+                print *, 'Invalid crop ID in ', trim(file), ' at row/column ', i, j, ': ', crop_id
+                print *, 'Execution will be aborted...'
+                stop
+            end if
+            if (crop_id > 0) then
+                if (.not. allocated(crops(crop_id)%gdd)) then
+                    print *, 'Crop ID ', crop_id, ' in ', trim(file), ' has no loaded crop definition.'
+                    print *, 'Execution will be aborted...'
+                    stop
+                end if
+            end if
+        end do
+    end do
+end subroutine update_crop_map
 
 subroutine write_daily_output(doy, meteo, info_meteo, pheno, h_irr_sum, balance, balance_old,    &
                             & info_spat, pars, wat, wat_bal_hour, fw, fw_old, esp_perc, out_cn,  &

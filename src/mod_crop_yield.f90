@@ -186,10 +186,10 @@ subroutine accumulate_daily_yield(acc, pheno, crops, meteo, balance, domain)
     end do
 end subroutine accumulate_daily_yield
 
-subroutine finalize_harvested_yield(acc, yld, pheno, crops, co2, domain)
+subroutine finalize_harvested_yield(acc, yld, harvest_pending, crops, co2, domain)
     type(yield_accumulator), intent(inout) :: acc
     type(yield_t), intent(inout) :: yld
-    type(crop_pars_matrices), intent(in) :: pheno
+    logical, intent(in) :: harvest_pending(:,:)
     type(crop_definition), intent(in) :: crops(:)
     real(dp), intent(in) :: co2
     type(grid_i), intent(in) :: domain
@@ -201,7 +201,7 @@ subroutine finalize_harvested_yield(acc, yld, pheno, crops, co2, domain)
 
             ! Only consider active cells whose crop is ready for harvest
             if (domain%mat(i,j) == domain%header%nan) cycle
-            if (.not. pheno%harvest_pending(i,j)) cycle
+            if (.not. harvest_pending(i,j)) cycle
 
             crop_id = acc%crop_id(i,j)
             slot = yld%completed_crops(i,j) + 1

@@ -126,6 +126,10 @@ RandSowDaysWind = 3
 # AggressiveSowing: harvest a standing crop early when necessary to sow the next crop in the rotation [T/F].
 AggressiveSowing = F
 
+# ReadCropMaps: experimental mode; reads crops from daily crop_id_<year>_<doy>.asc maps [T/F].
+# Overrides normal crop sow/harvest rules as well as landuse meaning (any crop can be sown in any cell)
+ReadCropMaps = F
+
 # Repeatable: use a repeatable random sequence, allowing identical results
 # across equivalent runs [T/F].
 Repeatable = T

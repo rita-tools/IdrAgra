@@ -84,6 +84,7 @@ type simulation
     logical :: rand_symmetry = .true.           ! states if the randomization of emergence date is symmetric [-n,+n] or asymmetric [0, 2n]
     integer :: sowing_range = 0                 ! range of variability of the sowing day [days]
     logical :: aggressive_sowing = .false.      ! end a standing crop early to make room for the next rotation crop
+    logical :: read_crop_maps = .false.         ! prescribe crop occupancy from crop_id_<year>_<doy>.asc maps
     logical :: repeatable = .true.              ! if true, al random generated are repeated over times
     integer :: imax = 1                         ! maximum number of rows in the raster map
     integer :: jmax = 1                         ! maximum number of columns in the raster map

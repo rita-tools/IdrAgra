@@ -271,13 +271,15 @@ real(dp) function compute_canopy_resistance(co2) result(resistance)
     resistance = (1._dp/leaf_conductance)/(0.5_dp*24._dp*0.12_dp)
 end function compute_canopy_resistance
 
-subroutine advance_crops_daily(pheno, crops, bare_soil, rotations, domain, soil_use, irandom, meteo, kcb_corr_fact, &
-                             & station_idx, station_weight, interpolate_temp, weather, current, aggressive_sowing   )
+subroutine advance_crops_daily(pheno, crops, bare_soil, rotations, domain, soil_use, read_crop_maps, &
+                             & crop_map, irandom, meteo, kcb_corr_fact, station_idx, station_weight, &
+                             & interpolate_temp, weather, current, aggressive_sowing                 )
     type(crop_pars_matrices), intent(inout) :: pheno
     type(crop_definition), intent(in) :: crops(:)
     type(crop_definition), intent(in) :: bare_soil
     type(crop_rotation), intent(inout) :: rotations(:)
-    type(grid_i), intent(in) :: domain, soil_use
+    type(grid_i), intent(in) :: domain, soil_use, crop_map
+    logical, intent(in) :: read_crop_maps
     integer, intent(in) :: irandom(:,:)
     type(meteo_mat), intent(in) :: meteo
     real(dp), intent(in) :: kcb_corr_fact(:,:)
@@ -288,7 +290,7 @@ subroutine advance_crops_daily(pheno, crops, bare_soil, rotations, domain, soil_
     type(crop_weather_series), intent(in) :: weather(:)
     type(date), intent(in) :: current
 
-    integer :: i, j, land_use, position, crop_id
+    integer :: i, j, land_use, position, crop_id, prescribed_crop_id
     real(dp) :: temperature, cut_gdd
 
     pheno%k_cb_old = pheno%k_cb
@@ -298,37 +300,53 @@ subroutine advance_crops_daily(pheno, crops, bare_soil, rotations, domain, soil_
             if (domain%mat(i,j) == domain%header%nan) cycle ! Skip inactive cells
 
             land_use = soil_use%mat(i,j)
-            if (pheno%harvest_pending(i,j)) call harvest_crop(pheno, crops, rotations(land_use),   &
-                                                            & land_use, i, j, current, irandom(i,j))
 
-            if (pheno%crop_id(i,j) == 0) then ! Soil is bare: consider sowing
-                call set_bare_soil_today(pheno, bare_soil, i, j)
-                position = pheno%rotation_position(i,j)
+            if (read_crop_maps) then ! Sow/harvest using maps, skipping usual logic (crops are only sown/harvested when the map changes)
+                prescribed_crop_id = crop_map%mat(i,j)
+                if (pheno%harvest_pending(i,j)) call set_baresoil(pheno, i, j)
 
-                ! First baresoil day after a landuse change: find the earliest sowable crop
-                if (pheno%rotation_land_use(i,j) /= land_use) then
-                    position = next_sowing_position(rotations(land_use), crops, current, irandom(i,j))
-                    pheno%rotation_land_use(i,j) = land_use
+                if (pheno%crop_id(i,j) == 0) then
+                    call set_bare_soil_today(pheno, bare_soil, i, j)
+                    if (prescribed_crop_id == 0) cycle
+                    crop_id = prescribed_crop_id
+                    call sow_crop(pheno, crops(crop_id), crop_id, i, j, current, meteo%lat(i,j),      &
+                                & station_idx(i,j,:), station_weight(i,j,:), interpolate_temp, weather)
+                else
+                    crop_id = pheno%crop_id(i,j)
                 end if
+            else
+                if (pheno%harvest_pending(i,j)) call harvest_crop(pheno, crops, rotations(land_use),   &
+                                                                & land_use, i, j, current, irandom(i,j))
 
-                ! Warn if a crop's sowing window passes without sowing (due to overlapping crops or bad temperatures)
-                call skip_missed_sowing_windows(position, rotations(land_use), crops, current, irandom(i,j), land_use)
-                pheno%rotation_position(i,j) = position
+                if (pheno%crop_id(i,j) == 0) then ! Soil is bare: consider sowing
+                    call set_bare_soil_today(pheno, bare_soil, i, j)
+                    position = pheno%rotation_position(i,j)
 
-                ! Count down bare soil period requirement
-                if (pheno%bare_soil_days_left(i,j) > 0) then
-                    pheno%bare_soil_days_left(i,j) = pheno%bare_soil_days_left(i,j) - 1
-                    cycle ! soil remains bare - go to next cell
+                    ! First baresoil day after a landuse change: find the earliest sowable crop
+                    if (pheno%rotation_land_use(i,j) /= land_use) then
+                        position = next_sowing_position(rotations(land_use), crops, current, irandom(i,j))
+                        pheno%rotation_land_use(i,j) = land_use
+                    end if
+
+                    ! Warn if a crop's sowing window passes without sowing (due to overlapping crops or bad temperatures)
+                    call skip_missed_sowing_windows(position, rotations(land_use), crops, current, irandom(i,j), land_use)
+                    pheno%rotation_position(i,j) = position
+
+                    ! Count down bare soil period requirement
+                    if (pheno%bare_soil_days_left(i,j) > 0) then
+                        pheno%bare_soil_days_left(i,j) = pheno%bare_soil_days_left(i,j) - 1
+                        cycle ! soil remains bare - go to next cell
+                    end if
+
+                    ! Sow the next crop in the rotation if its sowing window is open and temperature requirements are met
+                    crop_id = rotations(land_use)%crop_ids(position)
+                    temperature = (meteo%T_max(i,j) + meteo%T_min(i,j))/2._dp
+                    if (.not. should_sow_today(crops(crop_id), current%doy, irandom(i,j), temperature)) cycle
+                    call sow_crop(pheno, crops(crop_id), crop_id, i, j, current, meteo%lat(i,j),      &
+                                & station_idx(i,j,:), station_weight(i,j,:), interpolate_temp, weather)
+                else ! Continue the crop already in field
+                    crop_id = pheno%crop_id(i,j)
                 end if
-
-                ! Sow the next crop in the rotation if its sowing window is open and temperature requirements are met
-                crop_id = rotations(land_use)%crop_ids(position)
-                temperature = (meteo%T_max(i,j) + meteo%T_min(i,j))/2._dp
-                if (.not. should_sow_today(crops(crop_id), current%doy, irandom(i,j), temperature)) cycle
-                call sow_crop(pheno, crops(crop_id), crop_id, i, j, current, meteo%lat(i,j),      &
-                            & station_idx(i,j,:), station_weight(i,j,:), interpolate_temp, weather)
-            else ! Continue the crop already in field
-                crop_id = pheno%crop_id(i,j)
             end if
 
             ! Crop is in field: calculate GDD accumulation
@@ -343,8 +361,10 @@ subroutine advance_crops_daily(pheno, crops, bare_soil, rotations, domain, soil_
             ! Use the new GDD value to estimate crop state
             call populate_crop_today(pheno, crops(crop_id), kcb_corr_fact(crop_id,station_idx(i,j,1)), i, j)
 
-            pheno%harvest_pending(i,j) = should_harvest_crop(pheno, crops, rotations(land_use), land_use, cut_gdd, &
-                                                           & i, j, current, irandom(i,j), aggressive_sowing        )
+            if (.not. read_crop_maps) then
+                pheno%harvest_pending(i,j) = should_harvest_crop(pheno, crops, rotations(land_use), land_use, cut_gdd, &
+                                                               & i, j, current, irandom(i,j), aggressive_sowing        )
+            end if
         end do
     end do
 end subroutine advance_crops_daily
@@ -358,12 +378,7 @@ subroutine harvest_crop(pheno, crops, rotation, land_use, i, j, current_date, ir
     integer, intent(in) :: land_use, i, j, irandom
     integer :: position, crop_id
 
-    pheno%harvest_pending(i,j) = .false.
-    pheno%crop_id(i,j) = 0
-    pheno%gdd(i,j) = 0._dp
-    pheno%vern_days(i,j) = 0._dp
-    pheno%cuts_completed(i,j) = 0
-    pheno%pheno_stage(i,j) = 0
+    call set_baresoil(pheno, i, j)
 
     ! Move to next crop in the rotation
     if (pheno%rotation_land_use(i,j) /= land_use) then ! A land-use change occurred; find the closest sowing window
@@ -376,6 +391,18 @@ subroutine harvest_crop(pheno, crops, rotation, land_use, i, j, current_date, ir
     crop_id = rotation%crop_ids(position)
     pheno%bare_soil_days_left(i,j) = crops(crop_id)%crop_overlap_days
 end subroutine harvest_crop
+
+subroutine set_baresoil(pheno, i, j)
+    type(crop_pars_matrices), intent(inout) :: pheno
+    integer, intent(in) :: i, j
+
+    pheno%harvest_pending(i,j) = .false.
+    pheno%crop_id(i,j) = 0
+    pheno%gdd(i,j) = 0._dp
+    pheno%vern_days(i,j) = 0._dp
+    pheno%cuts_completed(i,j) = 0
+    pheno%pheno_stage(i,j) = 0
+end subroutine set_baresoil
 
 ! Sow a new crop: initialize phenology and project the curve's GDD threshold dates.
 subroutine sow_crop(pheno, crop, id, i, j, current, latitude, stations, weights, interpolate_temp, weather)
