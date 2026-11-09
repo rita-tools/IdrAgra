@@ -9,7 +9,7 @@ MODFLOW receives exchange and pumping, updates the water table, and feeds it bac
 
 It is assumed that the user has a pre-existing MODFLOW 6 simulation ready to use, which should:
 - Have one stress period per coupling period, including the potentially shorter final period
-- Represent groundwater as a 1-layer grid covering the complete rectangle described by IdrAgra's `domain.asc`, with same-sized cells
+- Use layered DISV discretization with one vertical groundwater column for each entry in IdrAgra's `domain.asc`
 - Include RCH and WEL packages containing one entry per complete grid cell (setting their values to 0 is ok as they are overridden by the coupling)
 - Have initial heads representing the same condition as IdrAgra's `waterdepth.asc`
 
@@ -40,6 +40,7 @@ Normal IdrAgra command line arguments are still usable by adding them after an e
 ## Additional notes
 
 - If IdrAgra is set to run a warmup year (i.e. `InitialThetaFlag = F`, recommended) MODFLOW's configuration must include that year
-- This prototype is currently only compatible with IdrAgra's "raster mode", i.e. that in which .asc file actually represent the spatial distribution of cells
+- IdrAgra domain entries and MODFLOW horizontal columns must use the same ordering; the coupler does not perform geographic remapping
 - Note that even if MODFLOW were to prescribe a very shallow / above-ground water table, IdrAgra internally enforces a minimum depth equal to its first layer's thickness
+- For multilayer models, the water table is taken from the uppermost active, saturated, convertible cell in each vertical column. Inactive and vertical pass-through cells are skipped.
 - MODFLOW simulates all cells in `domain.asc`, including IdrAgra's nodata cells; those cells currently have both pumping and percolation = 0

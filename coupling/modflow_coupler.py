@@ -119,6 +119,24 @@ class GridLayout:
         return self.shape[0] * self.shape[1]
 
 
+@dataclass(frozen=True)
+class ModflowGrid:
+    shape: tuple[int, ...]
+    top: np.ndarray
+    bottom: np.ndarray
+    idomain: np.ndarray
+    icelltype: np.ndarray
+    area: np.ndarray
+
+    @property
+    def nlay(self) -> int:
+        return self.shape[0]
+
+    @property
+    def ncolumns(self) -> int:
+        return int(np.prod(self.shape[1:]))
+
+
 class IdrAgraProcess:
     def __init__(self, executable: Path, run_dir: Path, executable_args: list[str], coupling_dir: Path, period_days: int):
         self.coupling_dir = coupling_dir
@@ -213,6 +231,7 @@ class CouplingCallback:
         self.period_index = 0
         self.period_days = 0
         self.model: Any = None
+        self.modflow_grid: ModflowGrid | None = None
         self.rch_package: Any = None
         self.wel_package: Any = None
 
@@ -223,7 +242,7 @@ class CouplingCallback:
         # Called once before the solving begins
         if callback_step == self.callbacks.initialize:
             self.model = simulation.get_model()
-            _validate_modflow_grid(self.model, self.grid_layout)
+            self.modflow_grid = _validate_modflow_grid(self.model, self.grid_layout)
             self.rch_package = _select_package(self.model, self.rch_name, "rch")
             self.wel_package = _select_package(self.model, self.wel_name, "wel")
             return
@@ -249,19 +268,8 @@ class CouplingCallback:
 
         # Called at the end of each stress period (gives control back to IdrAgra)
         if callback_step == self.callbacks.stress_period_end:
-            heads = np.asarray(self.model.X, dtype=float).reshape(-1)
-            top = np.asarray(self.model.dis.top.values, dtype=float).reshape(-1)
-            if heads.size != self.grid_layout.size:
-                raise CouplerError(
-                    "Prototype requires one MODFLOW layer aligned with the complete IdrAgra grid; "
-                    f"got {heads.size} heads and {self.grid_layout.size} IdrAgra cells"
-                )
-            if top.size == 1:
-                top = np.full(heads.size, top.item())
-            if top.size != heads.size:
-                raise CouplerError(f"MODFLOW top has {top.size} values; expected {heads.size}")
-
-            depth = np.maximum(top - heads, 0.0).reshape(self.grid_layout.shape)
+            assert self.modflow_grid is not None # modflow_grid was set during self.callbacks.initialize
+            depth = _heads_to_water_table_depth(self.model.X, self.modflow_grid, self.grid_layout.shape)
             self.idragra.continue_idragra_sim(self.period_index, AsciiGrid(self.grid_layout.header, depth))
 
 
@@ -384,13 +392,16 @@ def _read_params_file(path: Path) -> dict[str, str]:
             values[parameter.lower()] = value.strip("\"'") # Save the entry in the dictionary, using lowercase for the parameter name and stripping quotes if any
     return values
 
-
+# Fetch the specified (name, type) MF input package from the running MODFLOW model
 def _select_package(model: Any, name: str | None, package_type: str) -> Any:
+
+    # finds all packages of the specified type
     matches = {
         package_name: package
         for package_name, package in model.package_dict.items()
         if package.pkg_type.lower() == package_type
     }
+
     if name is not None:
         package = matches.get(name.lower())
         if package is None:
@@ -401,32 +412,96 @@ def _select_package(model: Any, name: str | None, package_type: str) -> Any:
         return package
     if len(matches) == 1:
         return next(iter(matches.values()))
+
+    # Raise an error if no packages with this name exist
     if not matches:
         raise CouplerError(f"MODFLOW model has no {package_type.upper()} package")
-    raise CouplerError(
-        f"MODFLOW model has multiple {package_type.upper()} packages ({', '.join(matches)}); "
-        f"set {'RechargePackage' if package_type == 'rch' else 'WellPackage'}"
-    )
 
-# Make sure that the MODFLOW grid matches the IdrAgra domain.asc grid
-def _validate_modflow_grid(model: Any, grid_layout: GridLayout) -> None:
+    # Raise an error if multiple packages with this name exist
+    setting = {"rch": "RechargePackage", "wel": "WellPackage"}.get(package_type)
+    message = f"MODFLOW model has multiple {package_type.upper()} packages ({', '.join(matches)})"
+    if setting is not None:
+        message += f"; set {setting}"
+    raise CouplerError(message)
+
+# Read an MF6 array and ensure it has the expected size and type
+def _package_array(package: Any, name: str, size: int, dtype: Any) -> np.ndarray:
+    try:
+        values = np.asarray(getattr(package, name).values, dtype=dtype).reshape(-1)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise CouplerError(f"MODFLOW {package.pkg_type.upper()} package has no readable {name.upper()} array") from exc
+    if values.size != size:
+        raise CouplerError(
+            f"MODFLOW {package.pkg_type.upper()} {name.upper()} has {values.size} values; expected {size}"
+        )
+    return values
+
+# Make sure that MODFLOW has one vertical column for each IdrAgra cell
+def _validate_modflow_grid(model: Any, grid_layout: GridLayout) -> ModflowGrid:
     model_shape = tuple(int(value) for value in model.shape)
-    expected_shape = (1, *grid_layout.shape)
-    if model_shape != expected_shape:
-        raise CouplerError(f"MODFLOW grid has shape {model_shape}; expected {expected_shape} from {DEFAULT_DOMAIN_FILE}")
+    if len(model_shape) < 2 or model_shape[0] <= 0:
+        raise CouplerError(f"MODFLOW grid has invalid shape {model_shape}")
+    nlay = model_shape[0]
+    ncolumns = int(np.prod(model_shape[1:]))
+    ncells = nlay * ncolumns
+    if ncolumns != grid_layout.size:
+        raise CouplerError(
+            f"MODFLOW grid has {ncolumns} horizontal columns; expected one for each of the "
+            f"{grid_layout.size} entries in {DEFAULT_DOMAIN_FILE}"
+        )
 
-    cell_area = np.asarray(model.dis.area.values, dtype=float).reshape(-1)
-    if cell_area.size != grid_layout.size or not np.allclose(
-        cell_area, grid_layout.cellsize**2, rtol=1e-9, atol=1e-9
-    ):
-        expected_area = grid_layout.cellsize**2
-        raise CouplerError(f"MODFLOW cell areas must equal the {expected_area:g} m2 cell area from domain.asc")
+    discretization_package = _select_package(model, None, "disv")
+    top = _package_array(discretization_package, "top", ncolumns, float)
+    bottom = _package_array(discretization_package, "botm", ncells, float).reshape(nlay, ncolumns)
+    idomain = _package_array(discretization_package, "idomain", ncells, int).reshape(nlay, ncolumns)
+    area = _package_array(discretization_package, "area", ncolumns, float)
+    if np.any(~np.isfinite(area)) or np.any(area <= 0.0):
+        raise CouplerError("MODFLOW cell areas must be finite and positive")
 
-    # Check that the MODFLOW IDOMAIN is positive for every cell in the complete IdrAgra grid rectangle
-    # (i.e. MODFLOW simulates all cells, even if some are inactive in IdrAgra)
-    idomain = np.asarray(model.dis.idomain.values).reshape(-1)
-    if idomain.size != grid_layout.size or np.any(idomain <= 0):
-        raise CouplerError("MODFLOW IDOMAIN must be positive for every cell in the complete IdrAgra grid rectangle")
+    npf_package = _select_package(model, None, "npf")
+    icelltype = _package_array(npf_package, "icelltype", ncells, int).reshape(nlay, ncolumns)
+
+    return ModflowGrid(model_shape, top, bottom, idomain, icelltype, area)
+
+# Convert MODFLOW heads to IdrAgra water table depth (m from surface) for each IdrAgra cell
+def _heads_to_water_table_depth(
+    heads: Any, modflow_grid: ModflowGrid, output_shape: tuple[int, int]
+) -> np.ndarray:
+    values = np.asarray(heads, dtype=float).reshape(-1)
+    expected = modflow_grid.nlay * modflow_grid.ncolumns
+    if values.size != expected:
+        raise CouplerError(f"MODFLOW returned {values.size} heads; expected {expected}")
+    values = values.reshape(modflow_grid.nlay, modflow_grid.ncolumns)
+
+    active = modflow_grid.idomain > 0 # An active layer participates in the MODFLOW solution
+    usable = (                        # An usable layer can be used to infer water table depth (unconfined with some saturated thickness)
+        active
+        & (modflow_grid.icelltype != 0)
+        & (values > modflow_grid.bottom)
+    )
+    has_usable_layer = np.any(usable, axis=0)
+    has_active_layer = np.any(active, axis=0)
+
+    if not np.all(has_active_layer):
+        missing = np.flatnonzero(~has_active_layer) + 1
+        preview = ", ".join(str(index) for index in missing[:10])
+        if missing.size > 10:
+            preview += ", ..."
+        raise CouplerError(f"Could not identify an active layer in {missing.size} MODFLOW column(s): {preview}")
+
+    layer_index = np.argmax(usable, axis=0) # topmost usable layer (looks for the first True value going down the column)
+    column_index = np.arange(modflow_grid.ncolumns)
+    water_table_head = values[layer_index, column_index]
+    depth = np.maximum(modflow_grid.top - water_table_head, 0.0) # Get depth, clamping it to zero if negative (i.e. water table above surface)
+
+    # If the entire column is dry, cap the depth at the bottom of its deepest active layer.
+    deepest_active_layer = modflow_grid.nlay - 1 - np.argmax(active[::-1], axis=0)
+    deepest_active_bottom = modflow_grid.bottom[deepest_active_layer, column_index]
+    depth[~has_usable_layer] = np.maximum(
+        modflow_grid.top[~has_usable_layer] - deepest_active_bottom[~has_usable_layer],
+        0.0,
+    )
+    return depth.reshape(output_shape)
 
 # Currently used to set IdrAgra-prescribed recharge and pumping values to MODFLOW packages
 def _set_mf_boundary_condition(
