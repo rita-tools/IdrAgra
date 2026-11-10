@@ -88,7 +88,7 @@ class AsciiGrid:
                 if len(parts) < 2:
                     raise CouplerError(f"Invalid ESRI ASCII header in {path}")
                 header.append((parts[0], parts[1]))
-            data = np.loadtxt(stream, dtype=float)
+            data = np.loadtxt(stream, dtype=float, ndmin=2)
 
         values = dict((key.lower(), value) for key, value in header)
         expected = (int(values["nrows"]), int(values["ncols"]))

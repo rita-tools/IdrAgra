@@ -1,14 +1,39 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 import numpy as np
 
 from coupling.modflow_coupler import (
+    AsciiGrid,
     CouplerError,
     GridLayout,
     _heads_to_water_table_depth,
     _validate_modflow_grid,
 )
+
+
+class AsciiGridTests(unittest.TestCase):
+    def test_preserves_single_column_shape(self):
+        contents = """ncols 1
+nrows 3
+xllcorner -1
+yllcorner -1
+cellsize 10
+NODATA_value -9999
+1
+2
+3
+"""
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "domain.asc"
+            path.write_text(contents, encoding="utf-8")
+
+            grid = AsciiGrid.read(path)
+
+        self.assertEqual(grid.data.shape, (3, 1))
+        np.testing.assert_array_equal(grid.data, [[1.0], [2.0], [3.0]])
 
 
 class Array:
