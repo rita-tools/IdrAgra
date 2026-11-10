@@ -80,29 +80,20 @@ class ModflowConfigurationTests(unittest.TestCase):
 
 
 class FinishedModflowTests(unittest.TestCase):
-    def test_reuses_last_water_table_until_idragra_finishes(self):
-        header = [
-            ("ncols", "1"), ("nrows", "1"), ("xllcorner", "0"),
-            ("yllcorner", "0"), ("cellsize", "1"), ("NODATA_value", "-9999"),
-        ]
-
+    def test_finishes_coupling_at_next_idragra_handshake(self):
         with TemporaryDirectory() as directory:
             idragra = IdrAgraProcess.__new__(IdrAgraProcess)
             idragra.coupling_dir = Path(directory)
             idragra.process = SimpleNamespace(
-                stdout=["IDRAGRA_COUPLING_READY 109 7\n", "IDRAGRA_COUPLING_READY 110 2\n"],
+                stdout=["IDRAGRA_COUPLING_READY 109 7\n", "IdrAgra finished\n"],
                 stdin=StringIO(),
                 wait=lambda: 0,
             )
 
-            idragra.finish_simulation(AsciiGrid(header, np.array([[4.5]])))
+            idragra.finish_simulation()
 
-            self.assertEqual(
-                idragra.process.stdin.getvalue(),
-                "IDRAGRA_COUPLING_CONTINUE 109\nIDRAGRA_COUPLING_CONTINUE 110\n",
-            )
-            self.assertEqual(AsciiGrid.read(Path(directory) / "water_table_000109.asc").data[0, 0], 4.5)
-            self.assertEqual(AsciiGrid.read(Path(directory) / "water_table_000110.asc").data[0, 0], 4.5)
+            self.assertEqual(idragra.process.stdin.getvalue(), "IDRAGRA_COUPLING_FINISH 109\n")
+            self.assertEqual(list(Path(directory).glob("water_table_*.asc")), [])
 
 
 class CouplingModeTests(unittest.TestCase):

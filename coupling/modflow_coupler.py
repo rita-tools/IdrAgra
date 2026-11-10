@@ -12,6 +12,7 @@ import numpy as np
 
 READY_TOKEN = "IDRAGRA_COUPLING_READY"
 CONTINUE_TOKEN = "IDRAGRA_COUPLING_CONTINUE"
+FINISH_TOKEN = "IDRAGRA_COUPLING_FINISH"
 DEFAULT_IDRAGRA_PARAMETERS_FILE = "idragra_parameters.txt"
 DEFAULT_MODFLOW_PARAMETERS_FILE = "modflow_parameters.txt"
 DEFAULT_IDRAGRA_INPUT_DIRECTORY = "spatial_data"
@@ -219,9 +220,9 @@ class IdrAgraProcess:
         self.process.stdin.write(f"{CONTINUE_TOKEN} {period_index}\n") # This is read by IdrAgra as if it were typed on the console (standard input)
         self.process.stdin.flush()
 
-    # After MODFLOW finishes normally, let IdrAgra finish using its last calculated water table
-    def finish_simulation(self, frozen_water_table: AsciiGrid) -> None:
-        using_frozen_water_table = False
+    # After MODFLOW finishes normally, tell IdrAgra to end coupling at its next handshake
+    def finish_simulation(self) -> None:
+        coupling_finished = False
         if self.process.stdout is not None:
             for line in self.process.stdout:
                 print(line, end="")
@@ -233,10 +234,14 @@ class IdrAgraProcess:
                 if len(fields) != 3:
                     raise CouplerError(f"Malformed IdrAgra handshake: {stripped}")
                 period_index = int(fields[1])
-                if not using_frozen_water_table:
-                    print("MODFLOW has finished; keeping its last water-table depths fixed for the rest of IdrAgra's run")
-                    using_frozen_water_table = True
-                self.continue_idragra_sim(period_index, frozen_water_table)
+                if coupling_finished:
+                    raise CouplerError("IdrAgra requested another handshake after coupling was finished")
+                print("MODFLOW has finished; returning water-table control to IdrAgra")
+                if self.process.stdin is None:
+                    raise CouplerError("IdrAgra stdin is unavailable")
+                self.process.stdin.write(f"{FINISH_TOKEN} {period_index}\n")
+                self.process.stdin.flush()
+                coupling_finished = True
         code = self.process.wait()
         if code != 0:
             raise CouplerError(f"IdrAgra exited with code {code}")
@@ -271,7 +276,6 @@ class CouplingCallback:
         self.modflow_grid: ModflowGrid | None = None
         self.rch_package: Any = None
         self.wel_package: Any = None
-        self.last_water_table: AsciiGrid | None = None
 
     # This is the function that gets called whenever the MODFLOW api uses "callback(simulation, step)".
     # Here we configure it to do different things depending on said step.
@@ -317,8 +321,9 @@ class CouplingCallback:
         if callback_step == self.callbacks.stress_period_end:
             assert self.modflow_grid is not None # modflow_grid was set during self.callbacks.initialize
             depth = _heads_to_water_table_depth(self.model.X, self.modflow_grid, self.grid_layout.shape)
-            self.last_water_table = AsciiGrid(self.grid_layout.header, depth)
-            self.idragra.continue_idragra_sim(self.period_index, self.last_water_table)
+            self.idragra.continue_idragra_sim(
+                self.period_index, AsciiGrid(self.grid_layout.header, depth)
+            )
 
 
 
@@ -375,9 +380,7 @@ def main() -> int:
 
     try:
         modflowapi.run_simulation(str(params.library), str(params.workspace), callback, verbose=False)
-        if callback.last_water_table is None:
-            raise CouplerError("MODFLOW finished without producing a water-table update")
-        idragra.finish_simulation(callback.last_water_table)
+        idragra.finish_simulation()
     finally:
         idragra.terminate()
     return 0

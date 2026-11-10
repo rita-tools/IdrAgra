@@ -44,7 +44,7 @@ Normal IdrAgra command line arguments are still usable by adding them after an e
 ## Additional notes
 
 - IdrAgra's warmup year (`InitialThetaFlag = F`) is not coupled. MODFLOW period 1 corresponds to `ModflowStartDate`, or to `StartSimulation` when that setting is omitted; before then IdrAgra uses its configured initial water-table grid.
-- If MODFLOW runs out of stress periods before IdrAgra ends, IdrAgra continues with the last water-table depths calculated by MODFLOW. Subsequent IdrAgra recharge and pumping are not passed to MODFLOW.
+- If MODFLOW runs out of stress periods before IdrAgra ends, coupling is disabled at IdrAgra's next handshake. IdrAgra then resumes its normal dated water-table ASC updates if those tables are present; otherwise it retains the last MODFLOW water table.
 - IdrAgra domain entries and MODFLOW horizontal columns must use the same ordering; the coupler does not perform geographic remapping
 - Note that even if MODFLOW were to prescribe a very shallow / above-ground water table, IdrAgra internally enforces a minimum depth equal to its first layer's thickness
 - For multilayer models, the water table is taken from the uppermost active, saturated, convertible cell in each vertical column. Inactive and vertical pass-through cells are skipped.

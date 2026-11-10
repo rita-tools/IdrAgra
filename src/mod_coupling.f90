@@ -9,13 +9,14 @@ implicit none
 
 private
 public :: mf_coupling_state, get_coupling_start_date, try_init_mf_coupling, accumulate_mf_fluxes, &
-        & coupling_is_due, coupling_handshake
+        & coupling_is_due, mf_handshake
 
 character(len=*), parameter :: ready_token = 'IDRAGRA_COUPLING_READY'
 character(len=*), parameter :: continue_token = 'IDRAGRA_COUPLING_CONTINUE'
+character(len=*), parameter :: finish_token = 'IDRAGRA_COUPLING_FINISH'
 
 type mf_coupling_state
-    logical :: enabled = .false.
+    logical :: active = .false.
     integer :: period_days = 0
     integer :: period_index = 0
     integer :: days_in_period = 0
@@ -76,7 +77,7 @@ subroutine try_init_mf_coupling(coupling, domain, current_date, start_date)
     allocate(coupling%private_pumping(size(domain%mat, 1), size(domain%mat, 2)))
     coupling%net_percolation = 0.0_dp
     coupling%private_pumping = 0.0_dp
-    coupling%enabled = .true.
+    coupling%active = .true.
 
     print *, 'IdrAgra/MODFLOW coupling enabled; period length [days]: ', coupling%period_days
 end subroutine try_init_mf_coupling
@@ -97,7 +98,7 @@ logical function coupling_is_due(coupling, is_last_day)
     coupling_is_due = coupling%days_in_period == coupling%period_days .or. is_last_day
 end function coupling_is_due
 
-subroutine coupling_handshake(coupling, domain, sim, extent, water_table, minimum_depth)
+subroutine mf_handshake(coupling, domain, sim, extent, water_table, minimum_depth)
     type(mf_coupling_state), intent(inout) :: coupling
     type(grid_i), intent(in) :: domain
     type(simulation), intent(in) :: sim
@@ -131,13 +132,23 @@ subroutine coupling_handshake(coupling, domain, sim, extent, water_table, minimu
     write(output_unit, '(a,1x,i0,1x,i0)') ready_token, coupling%period_index, coupling%days_in_period
     flush(output_unit)
 
-    ! Wait for MODFLOW to run and for the coupler to send a CONTINUE command with the correct period index
+    ! Wait for the coupler to continue this period or end MODFLOW coupling
     read(input_unit, '(A)', iostat=ios) response_from_coupler
-    if (ios /= 0) stop 'Coupling controller closed stdin before sending CONTINUE.'
+    if (ios /= 0) stop 'Coupling controller closed stdin before responding.'
     read(response_from_coupler, *, iostat=ios) token, received_index
-    if (ios /= 0 .or. trim(token) /= continue_token .or. received_index /= coupling%period_index) then
+    if (ios /= 0 .or. received_index /= coupling%period_index .or. &
+        (trim(token) /= continue_token .and. trim(token) /= finish_token)) then
         print *, 'Invalid coupling response: ', trim(response_from_coupler)
         stop 'IdrAgra/MODFLOW coupling protocol error.'
+    end if
+
+    if (trim(token) == finish_token) then
+        coupling%active = .false.
+        coupling%net_percolation = 0.0_dp
+        coupling%private_pumping = 0.0_dp
+        coupling%days_in_period = 0
+        print *, 'MODFLOW coupling finished; water-table control returned to IdrAgra.'
+        return
     end if
 
     ! Read the water-table grid returned by MODFLOW
@@ -155,6 +166,6 @@ subroutine coupling_handshake(coupling, domain, sim, extent, water_table, minimu
     coupling%net_percolation = 0.0_dp
     coupling%private_pumping = 0.0_dp
     coupling%days_in_period = 0
-end subroutine coupling_handshake
+end subroutine mf_handshake
 
 end module mod_coupling

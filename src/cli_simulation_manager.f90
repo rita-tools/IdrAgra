@@ -13,7 +13,7 @@ use mod_constants, only: tmax_time, tmin_time, pi, cost_fwEva, nan_i, nan_r
 use mod_common, only: wat_matrix, soil2_rice, hourly
 use mod_irrigation
 use mod_coupling, only: mf_coupling_state, get_coupling_start_date, try_init_mf_coupling, &
-                     & accumulate_mf_fluxes, coupling_is_due, coupling_handshake
+                     & accumulate_mf_fluxes, coupling_is_due, mf_handshake
 use cli_watsources
 use cli_save_outputs
 use mod_crop_yield, only: yield_t, yield_accumulator, initialize_yield, destroy_yield, initialize_yield_accumulator, &
@@ -284,7 +284,7 @@ subroutine simulation_manager(pars, info_spat, wat_src_tbl, info_sources, info_m
             coll_irr = 0; priv_irr = 0; iter1 = 0; iter2 = 0; h_irr = 0.
 
             ! Tries importing updated water table data into info_spat%wtab
-            if (pars%sim%f_cap_rise) call update_water_table(pars, info_spat, boundaries, y, doy)
+            if (pars%sim%f_cap_rise .and. .not. coupling%active) call update_water_table(pars, info_spat, boundaries, y, doy)
 
             if (pars%sim%read_crop_maps) then
                 call update_crop_map(pars, crop_map, info_spat%domain, boundaries, crops, y, doy)
@@ -753,12 +753,10 @@ subroutine simulation_manager(pars, info_spat, wat_src_tbl, info_sources, info_m
             call write_outputs_by_step(doy, meteo, h_irr_sum, bal, info_spat, coll_irr, priv_irr, stp_map,                &
                                      & deb_map, h_bypass, out_steps, days_before_1st_interval, last_simulated_doy, summary)
 
-            if (coupling%enabled) then
+            if (coupling%active) then
                 call accumulate_mf_fluxes(coupling, bal%lyr(2)%h_perc, bal%h_caprise, priv_irr)
-                if (coupling_is_due(coupling, simulation_year_idx == n_simulation_years .and. &
-                                              doy == last_simulated_doy)) then
-                    call coupling_handshake(coupling, info_spat%domain, pars%sim, boundaries, &
-                                          & info_spat%wat_tab, pars%depth%ze_fix)
+                if (coupling_is_due(coupling, simulation_year_idx == n_simulation_years .and. doy == last_simulated_doy)) then
+                    call mf_handshake(coupling, info_spat%domain, pars%sim, boundaries, info_spat%wat_tab, pars%depth%ze_fix)
                 end if
             end if
 
