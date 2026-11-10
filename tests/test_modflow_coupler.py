@@ -10,6 +10,7 @@ from coupling.modflow_coupler import (
     CouplerError,
     GridLayout,
     _heads_to_water_table_depth,
+    _is_USE_mode,
     _validate_modflow_grid,
 )
 
@@ -35,6 +36,16 @@ NODATA_value -9999
         self.assertEqual(grid.data.shape, (3, 1))
         np.testing.assert_array_equal(grid.data, [[1.0], [2.0], [3.0]])
 
+
+class CouplingModeTests(unittest.TestCase):
+    def test_reads_use_mode(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "idragra_parameters.txt"
+            path.write_text("Mode = 1\n", encoding="utf-8")
+
+            mode = _is_USE_mode(path)
+
+        self.assertEqual(mode, 1)
 
 class Array:
     def __init__(self, values):

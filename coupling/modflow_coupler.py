@@ -160,7 +160,7 @@ class IdrAgraProcess:
             errors="replace",
         )
 
-    def wait_for_idragra_flows(self) -> tuple[int, int, AsciiGrid, AsciiGrid]:
+    def wait_for_idragra_flows(self, read_pumping: bool) -> tuple[int, int, AsciiGrid, AsciiGrid | None]:
         if self.process.stdout is None:
             raise CouplerError("IdrAgra stdout is unavailable")
         while True:
@@ -187,7 +187,7 @@ class IdrAgraProcess:
             period_index, period_days = int(fields[1]), int(fields[2])
             suffix = f"{period_index:06d}.asc"
             h_net_perc = AsciiGrid.read(self.coupling_dir / f"net_percolation_{suffix}")
-            h_pumping = AsciiGrid.read(self.coupling_dir / f"pumping_{suffix}")
+            h_pumping = AsciiGrid.read(self.coupling_dir / f"pumping_{suffix}") if read_pumping else None
             return period_index, period_days, h_net_perc, h_pumping
 
     # Writes the updated water table to an .asc file and gives control back to IdrAgra
@@ -223,12 +223,14 @@ class CouplingCallback:
         rch_name: str | None,
         wel_name: str | None,
         grid_layout: GridLayout,
+        pumping_enabled: bool,
     ):
         self.idragra = idragra
         self.callbacks = callbacks
         self.rch_name = rch_name
         self.wel_name = wel_name
         self.grid_layout = grid_layout
+        self.pumping_enabled = pumping_enabled
         self.period_index = 0
         self.period_days = 0
         self.model: Any = None
@@ -245,12 +247,13 @@ class CouplingCallback:
             self.model = simulation.get_model()
             self.modflow_grid = _validate_modflow_grid(self.model, self.grid_layout)
             self.rch_package = _select_package(self.model, self.rch_name, "rch")
-            self.wel_package = _select_package(self.model, self.wel_name, "wel")
+            if self.pumping_enabled:
+                self.wel_package = _select_package(self.model, self.wel_name, "wel")
             return
 
         # Called at the beginning of each stress period (import recharge and pumping data simulated by IdrAgra)
         if callback_step == self.callbacks.stress_period_start:
-            period_index, period_days, h_net_perc, h_pumping = self.idragra.wait_for_idragra_flows()
+            period_index, period_days, h_net_perc, h_pumping = self.idragra.wait_for_idragra_flows(self.pumping_enabled)
 
             # Check that IdrAgra's period index (1-based) matches MODFLOW's stress period index (0-based)
             expected_index = int(simulation.kper) + 1
@@ -259,13 +262,16 @@ class CouplingCallback:
 
             period_seconds = period_days * SECONDS_PER_DAY
             recharge_m_per_second = h_net_perc.data / (1000.0 * period_seconds)
-            pumping_m3_per_second = -(h_pumping.data / 1000.0) * self.grid_layout.cellsize**2 / period_seconds
             _set_mf_boundary_condition(
                 self.rch_package, "recharge", h_net_perc, recharge_m_per_second, inactive_value=0.0
             )
-            _set_mf_boundary_condition(
-                self.wel_package, "q", h_pumping, pumping_m3_per_second, inactive_value=0.0
-            )
+            if self.pumping_enabled:
+                assert h_pumping is not None
+                assert self.wel_package is not None
+                pumping_m3_per_second = -(h_pumping.data / 1000.0) * self.grid_layout.cellsize**2 / period_seconds
+                _set_mf_boundary_condition(
+                    self.wel_package, "q", h_pumping, pumping_m3_per_second, inactive_value=0.0
+                )
 
             self.period_index = period_index
             self.period_days = period_days
@@ -299,6 +305,7 @@ def main() -> int:
             raise CouplerError(
                 f"MODFLOW coupling is disabled in {idragra_parameters}; set UseModflowCoupling = T to enable it"
             )
+        pumping_enabled = _is_USE_mode(idragra_parameters)
 
         # Read domain.asc and store its information in GridLayout (data exchanged between the models must match this grid)
         domain_grid = AsciiGrid.read(_domain_file(run_dir, idragra_parameters))
@@ -327,7 +334,7 @@ def main() -> int:
 
     # Set up the callback function that will be called by the MODFLOW API to exchange data with IdrAgra
     callback = CouplingCallback(
-        idragra, modflowapi.Callbacks, params.recharge_package, params.well_package, grid_layout
+        idragra, modflowapi.Callbacks, params.recharge_package, params.well_package, grid_layout, pumping_enabled
     )
 
     try:
@@ -381,6 +388,11 @@ def _is_coupling_enabled(path: Path) -> bool:
     if usemodflowcoupling.strip().lower() == "t":
         return True
     return False
+
+# Check whether IdrAgra is running in USE mode (Mode = 1)
+def _is_USE_mode(path: Path) -> bool:
+    values = _read_params_file(path)
+    return values.get("mode") == "1"
 
 # Read an input text file in the "parameter = value" format and store its contents in the "values" dictionary
 def _read_params_file(path: Path) -> dict[str, str]:

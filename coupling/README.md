@@ -11,7 +11,8 @@ It is assumed that the user has a pre-existing MODFLOW 6 simulation ready to use
 - Have one stress period per coupling period, including the potentially shorter final period
 - Use metres as its length unit and seconds as its time unit (the coupler supplies recharge in m/s and pumping in m3/s)
 - Use layered DISV discretization with one vertical groundwater column for each entry in IdrAgra's `domain.asc`
-- Include RCH and WEL packages containing one entry per complete grid cell (setting their values to 0 is ok as they are overridden by the coupling)
+- Include an RCH package containing one entry per complete grid cell (setting its values to 0 is ok as they are overridden by the coupling)
+- In USE mode (`Mode = 1`), include the WEL package used for IdrAgra pumping. WEL is optional in every other mode.
 - Have initial heads representing the same condition as IdrAgra's `waterdepth.asc`
 
 ## Configuration
@@ -44,4 +45,5 @@ Normal IdrAgra command line arguments are still usable by adding them after an e
 - IdrAgra domain entries and MODFLOW horizontal columns must use the same ordering; the coupler does not perform geographic remapping
 - Note that even if MODFLOW were to prescribe a very shallow / above-ground water table, IdrAgra internally enforces a minimum depth equal to its first layer's thickness
 - For multilayer models, the water table is taken from the uppermost active, saturated, convertible cell in each vertical column. Inactive and vertical pass-through cells are skipped.
+- IdrAgra pumping is passed to MODFLOW only in USE mode (`Mode = 1`). In other modes, existing MODFLOW WEL rates are left unchanged.
 - MODFLOW simulates all cells in `domain.asc`, including IdrAgra's nodata cells; those cells currently have both pumping and percolation = 0
