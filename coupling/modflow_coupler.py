@@ -445,8 +445,8 @@ def _package_array(package: Any, name: str, size: int, dtype: Any) -> np.ndarray
 # Make sure that MODFLOW has one vertical column for each IdrAgra cell
 def _validate_modflow_grid(model: Any, grid_layout: GridLayout) -> ModflowGrid:
     model_shape = tuple(int(value) for value in model.shape)
-    if len(model_shape) < 2 or model_shape[0] <= 0:
-        raise CouplerError(f"MODFLOW grid has invalid shape {model_shape}")
+    if len(model_shape) != 2 or model_shape[0] <= 0:
+        raise CouplerError(f"MODFLOW grid has shape {model_shape}; expected layered DISV (layers, columns)")
     nlay = model_shape[0]
     ncolumns = int(np.prod(model_shape[1:]))
     ncells = nlay * ncolumns
@@ -456,16 +456,17 @@ def _validate_modflow_grid(model: Any, grid_layout: GridLayout) -> ModflowGrid:
             f"{grid_layout.size} entries in {DEFAULT_DOMAIN_FILE}"
         )
 
-    discretization_package = _select_package(model, None, "disv")
-    top = _package_array(discretization_package, "top", ncolumns, float)
-    bottom = _package_array(discretization_package, "botm", ncells, float).reshape(nlay, ncolumns)
+    discretization_package = _select_package(model, None, "dis") # MFapi exposes a generic "dis" package for all discretization types (DIS, DISV, DISU)
+    top = _package_array(discretization_package, "top", ncells, float).reshape(nlay, ncolumns)[0]
+    bottom = _package_array(discretization_package, "bot", ncells, float).reshape(nlay, ncolumns)
     idomain = _package_array(discretization_package, "idomain", ncells, int).reshape(nlay, ncolumns)
-    area = _package_array(discretization_package, "area", ncolumns, float)
+    area = _package_array(discretization_package, "area", ncells, float).reshape(nlay, ncolumns)[0]
     if np.any(~np.isfinite(area)) or np.any(area <= 0.0):
         raise CouplerError("MODFLOW cell areas must be finite and positive")
 
     npf_package = _select_package(model, None, "npf")
-    icelltype = _package_array(npf_package, "icelltype", ncells, int).reshape(nlay, ncolumns)
+    icelltype = _package_array(npf_package, "icelltype", ncells, float).reshape(nlay, ncolumns)
+    icelltype = np.nan_to_num(icelltype, nan=0.0).astype(int) # API gives NaN to inactive cells; here we set it to 0
 
     return ModflowGrid(model_shape, top, bottom, idomain, icelltype, area)
 

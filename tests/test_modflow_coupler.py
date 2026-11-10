@@ -49,15 +49,15 @@ def package(package_type, **arrays):
 
 
 def layered_model():
-    disv = package(
-        "disv",
-        top=[10.0, 10.0, 10.0],
-        botm=[[5.0, 5.0, 5.0], [0.0, 0.0, 0.0]],
+    dis = package(
+        "dis",
+        top=[[10.0, 10.0, 10.0], [5.0, 5.0, 5.0]],
+        bot=[[5.0, 5.0, 5.0], [0.0, 0.0, 0.0]],
         idomain=[[1, 1, -1], [1, 1, 1]],
-        area=[100.0, 100.0, 100.0],
+        area=[[100.0, 100.0, 100.0], [100.0, 100.0, 100.0]],
     )
     npf = package("npf", icelltype=[[1, 1, 1], [1, 1, 1]])
-    return SimpleNamespace(shape=(2, 3), package_dict={"disv": disv, "npf": npf})
+    return SimpleNamespace(shape=(2, 3), package_dict={"dis": dis, "npf": npf})
 
 
 class ModflowGridTests(unittest.TestCase):
@@ -75,11 +75,11 @@ class ModflowGridTests(unittest.TestCase):
         with self.assertRaisesRegex(CouplerError, "horizontal columns"):
             _validate_modflow_grid(layered_model(), GridLayout([], (4, 1), 1.0))
 
-    def test_rejects_non_disv_discretization(self):
+    def test_rejects_structured_discretization(self):
         model = layered_model()
-        model.package_dict["disv"].pkg_type = "dis"
+        model.shape = (2, 1, 3)
 
-        with self.assertRaisesRegex(CouplerError, "no DISV package"):
+        with self.assertRaisesRegex(CouplerError, "expected layered DISV"):
             _validate_modflow_grid(model, self.layout)
 
     def test_selects_uppermost_active_saturated_convertible_head(self):
@@ -100,7 +100,7 @@ class ModflowGridTests(unittest.TestCase):
 
     def test_rejects_column_without_an_active_cell(self):
         model = layered_model()
-        model.package_dict["disv"].idomain.values = [[1, 0, -1], [1, 0, 1]]
+        model.package_dict["dis"].idomain.values = [[1, 0, -1], [1, 0, 1]]
         grid = _validate_modflow_grid(model, self.layout)
 
         with self.assertRaisesRegex(CouplerError, "1 MODFLOW column"):

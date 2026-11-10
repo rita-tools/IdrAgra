@@ -19,7 +19,7 @@ It is assumed that the user has a pre-existing MODFLOW 6 simulation ready to use
 Download the MODFLOW 6.7.0 windows zip package and exctract its libmf6.dll to a known location
 
 Install the Python dependencies numpy and modflowapi:
-    python -m pip install modflowapi numpy
+    python -m pip install "modflowapi>=1.0.1,<2" numpy
 
 In the IdrAgra working directory:
 1. Set `UseModflowCoupling = T` in `idragra_parameters.txt` (also make sure that `CapillaryFlag = T`)
