@@ -1,4 +1,5 @@
 import unittest
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -9,6 +10,7 @@ from coupling.modflow_coupler import (
     AsciiGrid,
     CouplerError,
     GridLayout,
+    IdrAgraProcess,
     _heads_to_water_table_depth,
     _is_USE_mode,
     _validate_modflow_grid,
@@ -35,6 +37,32 @@ NODATA_value -9999
 
         self.assertEqual(grid.data.shape, (3, 1))
         np.testing.assert_array_equal(grid.data, [[1.0], [2.0], [3.0]])
+
+
+class FinishedModflowTests(unittest.TestCase):
+    def test_reuses_last_water_table_until_idragra_finishes(self):
+        header = [
+            ("ncols", "1"), ("nrows", "1"), ("xllcorner", "0"),
+            ("yllcorner", "0"), ("cellsize", "1"), ("NODATA_value", "-9999"),
+        ]
+
+        with TemporaryDirectory() as directory:
+            idragra = IdrAgraProcess.__new__(IdrAgraProcess)
+            idragra.coupling_dir = Path(directory)
+            idragra.process = SimpleNamespace(
+                stdout=["IDRAGRA_COUPLING_READY 109 7\n", "IDRAGRA_COUPLING_READY 110 2\n"],
+                stdin=StringIO(),
+                wait=lambda: 0,
+            )
+
+            idragra.finish_simulation(AsciiGrid(header, np.array([[4.5]])))
+
+            self.assertEqual(
+                idragra.process.stdin.getvalue(),
+                "IDRAGRA_COUPLING_CONTINUE 109\nIDRAGRA_COUPLING_CONTINUE 110\n",
+            )
+            self.assertEqual(AsciiGrid.read(Path(directory) / "water_table_000109.asc").data[0, 0], 4.5)
+            self.assertEqual(AsciiGrid.read(Path(directory) / "water_table_000110.asc").data[0, 0], 4.5)
 
 
 class CouplingModeTests(unittest.TestCase):
