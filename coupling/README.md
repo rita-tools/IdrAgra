@@ -26,6 +26,8 @@ In the IdrAgra working directory:
 1. Set `UseModflowCoupling = T` in `idragra_parameters.txt` (also make sure that `CapillaryFlag = T`)
 2. Copy `modflow_parameters_example.txt` to the working directory as `modflow_parameters.txt` and adjust its values.
 
+`ModflowStartDate` can optionally place a shorter MODFLOW simulation within the IdrAgra run. Before that date IdrAgra runs uncoupled with its configured water-table grid. If omitted, coupling starts on `StartSimulation`.
+
 ## Run
 
 NOTE: due to the stdin channel being needed for the exchange of signals between the models, the coupled run doesn't wait for human input before overwriting output folders. Proceed with caution!
@@ -41,7 +43,7 @@ Normal IdrAgra command line arguments are still usable by adding them after an e
 
 ## Additional notes
 
-- IdrAgra's warmup year (`InitialThetaFlag = F`) is not coupled. MODFLOW period 1 corresponds to `StartSimulation`; during warmup IdrAgra uses its configured initial water-table grid.
+- IdrAgra's warmup year (`InitialThetaFlag = F`) is not coupled. MODFLOW period 1 corresponds to `ModflowStartDate`, or to `StartSimulation` when that setting is omitted; before then IdrAgra uses its configured initial water-table grid.
 - If MODFLOW runs out of stress periods before IdrAgra ends, IdrAgra continues with the last water-table depths calculated by MODFLOW. Subsequent IdrAgra recharge and pumping are not passed to MODFLOW.
 - IdrAgra domain entries and MODFLOW horizontal columns must use the same ordering; the coupler does not perform geographic remapping
 - Note that even if MODFLOW were to prescribe a very shallow / above-ground water table, IdrAgra internally enforces a minimum depth equal to its first layer's thickness

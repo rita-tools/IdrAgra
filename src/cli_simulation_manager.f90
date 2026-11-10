@@ -12,7 +12,8 @@ use mod_cropcoef, only: advance_crops_daily, crop_weather_series, load_crop_weat
 use mod_constants, only: tmax_time, tmin_time, pi, cost_fwEva, nan_i, nan_r
 use mod_common, only: wat_matrix, soil2_rice, hourly
 use mod_irrigation
-use mod_coupling, only: mf_coupling_state, init_mf_coupling, accumulate_mf_fluxes, coupling_is_due, coupling_handshake
+use mod_coupling, only: mf_coupling_state, get_coupling_start_date, try_init_mf_coupling, &
+                     & accumulate_mf_fluxes, coupling_is_due, coupling_handshake
 use cli_watsources
 use cli_save_outputs
 use mod_crop_yield, only: yield_t, yield_accumulator, initialize_yield, destroy_yield, initialize_yield_accumulator, &
@@ -91,7 +92,7 @@ subroutine simulation_manager(pars, info_spat, wat_src_tbl, info_sources, info_m
     integer :: dos, year_idx, simulation_year_idx, days_before_simulation
     integer,dimension(info_spat%domain%header%imax,info_spat%domain%header%jmax)::day_from_irr ! days past from the latest irrigation event
     real(dp),dimension(info_spat%domain%header%imax,info_spat%domain%header%jmax,2)::esp_perc  ! exponent of the percolation model
-    type(date) :: current ! Current date
+    type(date) :: current, coupling_start
     integer :: tmax_d, tmin_d, hr, lat_num
     real(dp):: h_irr_hour, lat_sum, lat_mean, DLH
     type(grid_r)::pheno_grd
@@ -216,16 +217,15 @@ subroutine simulation_manager(pars, info_spat, wat_src_tbl, info_sources, info_m
     dos = 0
     current = pars%sim%start ! Initialize current date to simulation start date
 
+    if (pars%sim%use_modflow_coupling .and. .not. is_warmup) then
+        coupling_start = get_coupling_start_date(pars%sim%start, pars%sim%end)
+    end if
+
     ! Skip leading info_meteo days
     days_before_simulation = days_between_dates(info_meteo(1)%start, pars%sim%start)
     if (days_before_simulation > 0) call skip_meteo_days(info_meteo, days_before_simulation)
 
     n_simulation_years = simulation_end%year - pars%sim%start%year + 1
-
-    ! Initialize MODFLOW coupling once per simulation (if enabled)
-    if (pars%sim%use_modflow_coupling .and. .not. is_warmup) then
-        call init_mf_coupling(coupling, info_spat%domain)
-    end if
 
     year_cycle: do simulation_year_idx = 1, n_simulation_years
 
@@ -275,6 +275,10 @@ subroutine simulation_manager(pars, info_spat, wat_src_tbl, info_sources, info_m
         ! Daily simulation cycle
         day_cycle: do doy = first_simulated_doy, last_simulated_doy
             print*,'Simulation day', achar(9), doy, achar(9), 'year', achar(9), y
+
+            if (pars%sim%use_modflow_coupling .and. .not. is_warmup) then
+                call try_init_mf_coupling(coupling, info_spat%domain, current, coupling_start)
+            end if
 
             dos = dos + 1 ! Day of Simulation
             coll_irr = 0; priv_irr = 0; iter1 = 0; iter2 = 0; h_irr = 0.

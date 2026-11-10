@@ -11,6 +11,7 @@ from coupling.modflow_coupler import (
     CouplerError,
     GridLayout,
     IdrAgraProcess,
+    ModflowConfiguration,
     _heads_to_water_table_depth,
     _is_USE_mode,
     _validate_modflow_grid,
@@ -37,6 +38,45 @@ NODATA_value -9999
 
         self.assertEqual(grid.data.shape, (3, 1))
         np.testing.assert_array_equal(grid.data, [[1.0], [2.0], [3.0]])
+
+
+class ModflowConfigurationTests(unittest.TestCase):
+    def test_start_date_is_optional(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "modflow_parameters.txt"
+            path.write_text(
+                "LibMf6 = libmf6.dll\nModflowWorkspace = model\nCouplingPeriodDays = 7\n",
+                encoding="utf-8",
+            )
+
+            configuration = ModflowConfiguration.read(path)
+
+        self.assertIsNone(configuration.start_date)
+
+    def test_reads_and_normalizes_start_date(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "modflow_parameters.txt"
+            path.write_text(
+                "LibMf6 = libmf6.dll\nModflowWorkspace = model\n"
+                "CouplingPeriodDays = 7\nModflowStartDate = 9/2/2023\n",
+                encoding="utf-8",
+            )
+
+            configuration = ModflowConfiguration.read(path)
+
+        self.assertEqual(configuration.start_date, "09/02/2023")
+
+    def test_rejects_invalid_start_date(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "modflow_parameters.txt"
+            path.write_text(
+                "LibMf6 = libmf6.dll\nModflowWorkspace = model\n"
+                "CouplingPeriodDays = 7\nModflowStartDate = 31/2/2023\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(CouplerError, "dd/mm/yyyy"):
+                ModflowConfiguration.read(path)
 
 
 class FinishedModflowTests(unittest.TestCase):

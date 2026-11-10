@@ -1,5 +1,6 @@
 import argparse
 from dataclasses import dataclass
+from datetime import datetime
 import os
 from pathlib import Path
 import subprocess
@@ -36,6 +37,7 @@ class ModflowConfiguration:
     period_days: int = 7
     recharge_package: str | None = None
     well_package: str | None = None
+    start_date: str | None = None
 
     @classmethod
     def read(cls, path: Path) -> "ModflowConfiguration":
@@ -53,12 +55,19 @@ class ModflowConfiguration:
             raise CouplerError(f"{path}: CouplingPeriodDays must be an integer") from exc
         if period_days <= 0:
             raise CouplerError(f"{path}: CouplingPeriodDays must be positive")
+        start_date = values.get("modflowstartdate")
+        if start_date is not None:
+            try:
+                start_date = datetime.strptime(start_date, "%d/%m/%Y").strftime("%d/%m/%Y")
+            except ValueError as exc:
+                raise CouplerError(f"{path}: ModflowStartDate must use dd/mm/yyyy") from exc
         return cls(
             library = _resolve_path_from(path.parent, library),
             workspace = _resolve_path_from(path.parent, workspace),
             period_days = period_days,
             recharge_package = values.get("rechargepackage"),
             well_package = values.get("wellpackage"),
+            start_date = start_date,
         )
 
 
@@ -139,13 +148,25 @@ class ModflowGrid:
 
 
 class IdrAgraProcess:
-    def __init__(self, executable: Path, run_dir: Path, executable_args: list[str], coupling_dir: Path, period_days: int):
+    def __init__(
+        self,
+        executable: Path,
+        run_dir: Path,
+        executable_args: list[str],
+        coupling_dir: Path,
+        period_days: int,
+        modflow_start_date: str | None,
+    ):
         self.coupling_dir = coupling_dir
 
         # Make coupling_dir and period_days available to IdrAgra as environmental variables
         environment = os.environ.copy()
         environment["IDRAGRA_COUPLING_DIR"] = str(coupling_dir)
         environment["IDRAGRA_COUPLING_DAYS"] = str(period_days)
+        if modflow_start_date is not None:
+            environment["IDRAGRA_COUPLING_START_DATE"] = modflow_start_date
+        else:
+            environment.pop("IDRAGRA_COUPLING_START_DATE", None)
 
         # Launches IdrAgra as a subprocess, redirecting its stdin and stdout to pipes for communication
         self.process = subprocess.Popen(
@@ -344,7 +365,7 @@ def main() -> int:
 
     # Set up and launch the IdrAgra process
     idragra = IdrAgraProcess(
-        executable.resolve(), run_dir, executable_args, coupling_dir.resolve(), params.period_days
+        executable.resolve(), run_dir, executable_args, coupling_dir.resolve(), params.period_days, params.start_date
     )
 
     # Set up the callback function that will be called by the MODFLOW API to exchange data with IdrAgra

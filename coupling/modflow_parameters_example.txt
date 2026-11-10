@@ -14,6 +14,9 @@ ModflowWorkspace = a_path/to/your/folder
 # Number of IdrAgra days represented by one MODFLOW stress period.
 CouplingPeriodDays = 7
 
+# First IdrAgra simulation day coupled to MODFLOW. If omitted, StartSimulation is used.
+# ModflowStartDate = 09/02/2023
+
 # Names of the packages that IdrAgra acts on during the coupled run (see MODFLOW's .nam file)
 # They only need to be specified if the MODFLOW simulation has multiple .rch or .wel files, should stay commented-out otherwise
 # RechargePackage = rch_0

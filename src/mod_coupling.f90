@@ -1,13 +1,15 @@
 module mod_coupling
 use, intrinsic :: iso_fortran_env, only: input_unit, output_unit
 use mod_constants, only: dp
+use mod_date, only: date, split_date, dates_are_equal, date_is_before, date_to_string
 use mod_grid, only: bound, grid_i, grid_r, print_mat_as_grid, read_grid
 use mod_parameters, only: simulation
 use mod_system, only: delimiter
 implicit none
 
 private
-public :: mf_coupling_state, init_mf_coupling, accumulate_mf_fluxes, coupling_is_due, coupling_handshake
+public :: mf_coupling_state, get_coupling_start_date, try_init_mf_coupling, accumulate_mf_fluxes, &
+        & coupling_is_due, coupling_handshake
 
 character(len=*), parameter :: ready_token = 'IDRAGRA_COUPLING_READY'
 character(len=*), parameter :: continue_token = 'IDRAGRA_COUPLING_CONTINUE'
@@ -24,11 +26,33 @@ end type mf_coupling_state
 
 contains
 
-subroutine init_mf_coupling(coupling, domain)
-    type(mf_coupling_state), intent(out) :: coupling
+function get_coupling_start_date(default_start, simulation_end) result(start_date)
+    type(date), intent(in) :: default_start, simulation_end
+    type(date) :: start_date
+    character(len=32) :: start_text
+    integer :: env_status
+
+    call get_environment_variable('IDRAGRA_COUPLING_START_DATE', start_text, status=env_status)
+    if (env_status == 0 .and. len_trim(start_text) > 0) then
+        call split_date(trim(start_text), start_date)
+    else
+        start_date = default_start
+    end if
+
+    if (date_is_before(start_date, default_start) .or. date_is_before(simulation_end, start_date)) then
+        stop 'ModflowStartDate must fall between StartSimulation and EndSimulation.'
+    end if
+    print *, 'MODFLOW coupling will start on ', date_to_string(start_date)
+end function get_coupling_start_date
+
+subroutine try_init_mf_coupling(coupling, domain, current_date, start_date)
+    type(mf_coupling_state), intent(inout) :: coupling
     type(grid_i), intent(in) :: domain
+    type(date), intent(in) :: current_date, start_date
     character(len=32) :: days_text
     integer :: env_length, env_status, ios
+
+    if (.not. dates_are_equal(current_date, start_date)) return
 
     ! Get the path to the coupling directory used to exchange fluxes with MODFLOW
     call get_environment_variable('IDRAGRA_COUPLING_DIR', coupling%directory, length=env_length, status=env_status)
@@ -55,7 +79,7 @@ subroutine init_mf_coupling(coupling, domain)
     coupling%enabled = .true.
 
     print *, 'IdrAgra/MODFLOW coupling enabled; period length [days]: ', coupling%period_days
-end subroutine init_mf_coupling
+end subroutine try_init_mf_coupling
 
 subroutine accumulate_mf_fluxes(coupling, deep_percolation, capillary_rise, private_pumping)
     type(mf_coupling_state), intent(inout) :: coupling
