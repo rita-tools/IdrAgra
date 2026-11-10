@@ -223,7 +223,7 @@ subroutine simulation_manager(pars, info_spat, wat_src_tbl, info_sources, info_m
     n_simulation_years = simulation_end%year - pars%sim%start%year + 1
 
     ! Initialize MODFLOW coupling once per simulation (if enabled)
-    if (pars%sim%use_modflow_coupling .and. .not. coupling%enabled) then
+    if (pars%sim%use_modflow_coupling .and. .not. is_warmup) then
         call init_mf_coupling(coupling, info_spat%domain)
     end if
 
