@@ -9,6 +9,7 @@ MODFLOW receives exchange and pumping, updates the water table, and feeds it bac
 
 It is assumed that the user has a pre-existing MODFLOW 6 simulation ready to use, which should:
 - Have one stress period per coupling period, including the potentially shorter final period
+- Use metres as its length unit and seconds as its time unit (the coupler supplies recharge in m/s and pumping in m3/s)
 - Use layered DISV discretization with one vertical groundwater column for each entry in IdrAgra's `domain.asc`
 - Include RCH and WEL packages containing one entry per complete grid cell (setting their values to 0 is ok as they are overridden by the coupling)
 - Have initial heads representing the same condition as IdrAgra's `waterdepth.asc`

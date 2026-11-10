@@ -16,6 +16,7 @@ DEFAULT_MODFLOW_PARAMETERS_FILE = "modflow_parameters.txt"
 DEFAULT_IDRAGRA_INPUT_DIRECTORY = "spatial_data"
 DEFAULT_DOMAIN_FILE = "domain.asc"
 DEFAULT_COUPLING_DIRECTORY = "modflow_exchange"
+SECONDS_PER_DAY = 86400.0
 
 
 class CouplerError(RuntimeError):
@@ -256,10 +257,15 @@ class CouplingCallback:
             if period_index != expected_index:
                 raise CouplerError(f"IdrAgra period {period_index}; MODFLOW expected {expected_index}")
 
-            recharge_m_per_day = h_net_perc.data / (1000.0 * period_days)
-            pumping_m3_per_day = -(h_pumping.data / 1000.0) * self.grid_layout.cellsize**2 / period_days
-            _set_mf_boundary_condition(self.rch_package, "recharge", h_net_perc, recharge_m_per_day, inactive_value=0.0)
-            _set_mf_boundary_condition(self.wel_package, "q", h_pumping, pumping_m3_per_day, inactive_value=0.0)
+            period_seconds = period_days * SECONDS_PER_DAY
+            recharge_m_per_second = h_net_perc.data / (1000.0 * period_seconds)
+            pumping_m3_per_second = -(h_pumping.data / 1000.0) * self.grid_layout.cellsize**2 / period_seconds
+            _set_mf_boundary_condition(
+                self.rch_package, "recharge", h_net_perc, recharge_m_per_second, inactive_value=0.0
+            )
+            _set_mf_boundary_condition(
+                self.wel_package, "q", h_pumping, pumping_m3_per_second, inactive_value=0.0
+            )
 
             self.period_index = period_index
             self.period_days = period_days
@@ -474,7 +480,7 @@ def _heads_to_water_table_depth(
     values = values.reshape(modflow_grid.nlay, modflow_grid.ncolumns)
 
     active = modflow_grid.idomain > 0 # An active layer participates in the MODFLOW solution
-    usable = (                        # An usable layer can be used to infer water table depth (unconfined with some saturated thickness)
+    usable = (                        # An usable layer can be used to infer water table depth (convertible with some saturated thickness)
         active
         & (modflow_grid.icelltype != 0)
         & (values > modflow_grid.bottom)
