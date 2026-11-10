@@ -1,7 +1,7 @@
 module cli_watsources
 use mod_constants, only: dp, seconds_per_day
 use mod_date, only: date, split_date, days_between_dates, dates_are_equal
-use mod_utility, only: get_value_index, lower_case
+use mod_utility, only: get_value_index, lower_case, itoa
 use mod_parameters
 use mod_grid, only: grid_i, grid_r
 use mod_meteo, only: meteo_info
@@ -155,8 +155,8 @@ subroutine read_unm_coll_sources_list(file_name, unm_coll_src_tbl, n_unm_coll_sr
                             stop
                         end if
                     case default
-                        print *, 'Skipping invalid or obsolete label <',trim(label),'> at line', line, &
-                            & ' of file: ', file_name
+                        print *, 'Skipping invalid or obsolete label <',trim(label),'> at line ', itoa(line), &
+                            & ' of file: ', trim(file_name)
                 end select
             end if
         end if
@@ -228,7 +228,7 @@ subroutine read_unm_coll_source_par(file_name, unm_col_sour_tbl, k, pars)
                             stop
                         end if
                     case default ! all  other cases ...
-                        print *, 'Skipping invalid or obsolete label <',trim(label),'> at line', line, &
+                        print *, 'Skipping invalid or obsolete label <',trim(label),'> at line ', itoa(line), &
                             & ' of file: ', trim(file_name)
                 end select
             end if

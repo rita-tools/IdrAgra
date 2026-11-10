@@ -475,7 +475,7 @@ subroutine read_sim_parameters(file_xml, xml, reckless)
 
 
                     case default ! all other cases ...
-                        print *, 'Skipping invalid or obsolete label <',trim(label),'> at line', line, &
+                        print *, 'Skipping invalid or obsolete label <',trim(label),'> at line ', itoa(line), &
                             & ' of file: ', trim(file_xml)
                 end select
             end if
@@ -644,8 +644,6 @@ subroutine read_all_irr_methods(xml, debug)
 
     line = 0; tablestart = 0
     ios = 0
-    print*,'irr_met_path: ',     xml%sim%irr_met_path
-    print*,'irr_met_filename: ', xml%sim%irr_met_list_fn
 
     open(newunit=free_unit, file=trim(xml%sim%irr_met_path)//trim(xml%sim%irr_met_list_fn), action="read")
     line = 0; tablestart = 0

@@ -1058,7 +1058,7 @@ subroutine update_water_table(pars, info_spat, boundaries, year, doy)
     end if
 
     ! File is present: imports the data
-    print *, 'Reading updated water table data from: ', file
+    print *, 'Reading updated water table data from: ', trim(file)
     call read_grid(trim(file), info_spat%wat_tab, pars%sim, boundaries)
 
     ! Ensures the water table can't enter the first soil layer
