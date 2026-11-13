@@ -1,0 +1,63 @@
+name: macOS build check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - Tentative-Mac-compatibility
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+          - runner: macos-15-intel
+            architecture: x86_64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          uname -a
+          gfortran-14 --version
+
+      - name: Build release and debug executables
+        run: |
+          mkdir -p release obj
+          make cleanall
+          make VERSION=v2.3.4 CC=gfortran-14 'CPP=gfortran-14 -cpp'
+          make cleanobjects
+          make debug=1 VERSION=v2.3.4 CC=gfortran-14 'CPP=gfortran-14 -cpp'
+
+      - name: Inspect executables
+        run: |
+          file release/idragra_*
+          otool -L release/idragra_*_release
+          otool -L release/idragra_*_debug
+
+      - name: Package build
+        run: |
+          package_dir="release/IdrAgra_${GITHUB_SHA::7}_macOS_${{ matrix.architecture }}"
+          mkdir -p "$package_dir"
+          cp release/idragra_*_release "$package_dir/"
+          cp release/idragra_*_debug "$package_dir/"
+          cp -R Utilities "$package_dir/Utilities"
+          cp -R demo "$package_dir/demo"
+          ditto -c -k --sequesterRsrc --keepParent "$package_dir" "$package_dir.zip"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: IdrAgra-macOS-${{ matrix.architecture }}
+          path: release/IdrAgra_*_macOS_${{ matrix.architecture }}.zip
+          if-no-files-found: error
+

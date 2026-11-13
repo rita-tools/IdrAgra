@@ -1,21 +1,31 @@
 # version string for the header: use an exact tag when present, otherwise the commit string
 VERSION := $(shell git describe --tags --exact-match HEAD 2>/dev/null || git rev-parse --short HEAD)
-CURRENTDATE := $(shell date --iso=seconds)
+CURRENTDATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LOG_FILE := $(shell git log --format=reference > ./release/git_idragra.log)
 
-# Windows OS variables & settings
+# OS variables & settings
 DEL = rm
 CP = cp
-EXE = .exe
-WIN = 1
+
+ifeq ($(OS),Windows_NT)
+   EXE = .exe
+   WIN = 1
+   STATIC_FLAG = -static
+else
+   EXE =
+   WIN = 0
+   STATIC_FLAG =
+endif
 
 # Compiler settings
 # -cpp: activates compiler pre processing
 # -DGIT_VERSION: sets the macro GIT_VERSION in the code (actually used only in cli_main.f90)
 # -g: enables debug with breakpoints 
 
-MINGW64_BINDIR ?= /mingw64/bin
-export PATH := $(MINGW64_BINDIR):$(PATH)
+ifeq ($(OS),Windows_NT)
+   MINGW64_BINDIR ?= /mingw64/bin
+   export PATH := $(MINGW64_BINDIR):$(PATH)
+endif
 
 CC = gfortran
 CPP = gfortran -cpp
@@ -58,7 +68,7 @@ FILES = mod_constants mod_utility mod_parameters mod_grid mod_common mod_evapotr
 $(APPNAME): $(patsubst %, $(OBJDIR)/%.o, $(FILES))
 	$(DEL) -f $(OBJDIR)/cli_main.o
 	$(CC) -o $(OBJDIR)/cli_main.o -J$(OBJDIR) $(GFFLAGS) $(SRCDIR)/cli_main.f90
-	$(CPP) -o $(RELDIR)/$@$(EXE) $^ $(OBJDIR)/cli_main.o $(LDFLAGS) -static
+	$(CPP) -o $(RELDIR)/$@$(EXE) $^ $(OBJDIR)/cli_main.o $(LDFLAGS) $(STATIC_FLAG)
 	$(CP) $(RELDIR)/$@$(EXE) $(RELDIR)/$(APPALIAS)$(EXE)
 
 # The following sets a function that creates makefile rules
@@ -89,7 +99,7 @@ cleanobjects:
 
 .PHONY: cleanall
 cleanall: cleanobjects
-	$(DEL) -f $(wildcard ./$(RELDIR)/*.exe)
+	$(DEL) -f $(wildcard ./$(RELDIR)/idragra_*)
 
 .PHONY: cleanmain
 cleanmain:
