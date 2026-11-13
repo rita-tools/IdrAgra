@@ -60,6 +60,52 @@ jobs:
           cp -R demo "$package_dir/demo"
           ditto -c -k --sequesterRsrc --keepParent "$package_dir" "$package_dir.zip"
 
+      # Verify that the demo simulation runs successfully
+      - name: Run packaged demo
+        shell: bash
+        run: |
+          archive=$(find release -maxdepth 1 \
+            -name 'IdrAgra_*_macOS_${{ matrix.architecture }}.zip' \
+            -print -quit)
+
+          test -n "$archive"
+
+          test_root="$RUNNER_TEMP/idragra-package-test"
+          rm -rf "$test_root"
+          mkdir -p "$test_root"
+
+          ditto -x -k "$archive" "$test_root"
+
+          executable=$(find "$test_root" -type f \
+            -name 'idragra_*_release' \
+            -print -quit)
+
+          test -n "$executable"
+          chmod +x "$executable"
+
+          demo_dir="$(dirname "$executable")/demo"
+
+          # Force a clean simulation and avoid the existing-output prompt.
+          rm -rf "$demo_dir/simout" "$demo_dir/final_condition"
+
+          (
+            cd "$demo_dir"
+            "$executable" -f idragra_parameters.txt \
+              > IdrAgra_console.log 2>&1
+          )
+
+          # Validate version
+          grep -q 'code version: *v2.3.4' \
+            "$demo_dir/IdrAgra_console.log"
+
+          # Check that output files exist and are non-empty
+          test -s "$demo_dir/simout/2021_irr_tot.asc"
+          test -s "$demo_dir/simout/2022_irr_tot.asc"
+          test -s "$demo_dir/final_condition/fc_thetaI.asc"
+          test -s "$demo_dir/final_condition/fc_thetaII.asc"
+
+          tail -n 30 "$demo_dir/IdrAgra_console.log"
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
