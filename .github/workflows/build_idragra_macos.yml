@@ -34,9 +34,15 @@ jobs:
         run: |
           mkdir -p release obj
           make cleanall
-          make VERSION=v2.3.4 CC=gfortran-14 'CPP=gfortran-14 -cpp'
+          make VERSION=v2.3.4 \
+            CC=gfortran-14 \
+            'CPP=gfortran-14 -cpp' \
+            'LDFLAGS=-static-libgfortran -static-libgcc -static-libquadmath'
           make cleanobjects
-          make debug=1 VERSION=v2.3.4 CC=gfortran-14 'CPP=gfortran-14 -cpp'
+          make debug=1 VERSION=v2.3.4 \
+            CC=gfortran-14 \
+            'CPP=gfortran-14 -cpp' \
+            'LDFLAGS=-static-libgfortran -static-libgcc -static-libquadmath'
 
       - name: Inspect executables
         run: |
