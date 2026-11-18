@@ -35,16 +35,16 @@ debug ?= 0
 CPPFLAGS = -cpp -DGIT_VERSION=\"$(VERSION)\" -DCOMP_DATE=\"$(CURRENTDATE)\" -DWIN=$(WIN)
 
 ifeq ($(debug),1)
-   TYPE := debug
+   SUFFIX := _debug
    FFLAGS = -ffree-line-length-0 -g -Wall -Wconversion -fimplicit-none -fbacktrace -fcheck=all,no-array-temps -ffpe-trap=zero,overflow,underflow -finit-real=nan
    LDFLAGS = -g
 else
-   TYPE := release
+   SUFFIX :=
    FFLAGS = -ffree-line-length-0 -ffast-math -O3
    LDFLAGS =
 endif
 
-APPNAME = idragra_$(VERSION)_$(TYPE)
+APPNAME = idragra_$(VERSION)$(SUFFIX)
 APPALIAS = idragra_latest
 EXT = .f90
 SRCDIR = src

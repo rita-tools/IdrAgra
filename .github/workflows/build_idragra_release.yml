@@ -27,8 +27,8 @@ jobs:
           $packageDir = "release/IdrAgra_${{ github.ref_name }}_Windows"
           $zipPath = "$packageDir.zip"
           New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
-          Copy-Item release/*_release.exe $packageDir/
-          Copy-Item release/*_debug.exe $packageDir/
+          Copy-Item "release/idragra_${{ github.ref_name }}.exe" $packageDir/
+          Copy-Item "release/idragra_${{ github.ref_name }}_debug.exe" $packageDir/
           Copy-Item Utilities $packageDir/Utilities -Recurse
           Copy-Item demo $packageDir/demo -Recurse
           Compress-Archive -Path $packageDir -DestinationPath $zipPath -Force
@@ -66,15 +66,15 @@ jobs:
             'CPP=gfortran-14 -cpp'
       - name: Inspect executables
         run: |
-          file release/idragra_*
-          otool -L release/idragra_*_release
-          otool -L release/idragra_*_debug
+          file "release/idragra_${GITHUB_REF_NAME}" \
+            "release/idragra_${GITHUB_REF_NAME}_debug"
+          otool -L "release/idragra_${GITHUB_REF_NAME}"
+          otool -L "release/idragra_${GITHUB_REF_NAME}_debug"
       - name: Test demo simulation
         shell: bash
         run: |
-          executable=$(find release -maxdepth 1 -type f \
-            -name 'idragra_*_release' -print -quit)
-          test -n "$executable"
+          executable="release/idragra_${GITHUB_REF_NAME}"
+          test -x "$executable"
           rm -rf demo/simout demo/final_condition
           (
             cd demo
@@ -92,8 +92,9 @@ jobs:
         run: |
           stage_dir="macos-${{ matrix.architecture }}"
           mkdir -p "$stage_dir/${{ matrix.architecture }}"
-          cp release/idragra_*_release "$stage_dir/${{ matrix.architecture }}/"
-          cp release/idragra_*_debug "$stage_dir/${{ matrix.architecture }}/"
+          cp "release/idragra_${GITHUB_REF_NAME}" \
+            "release/idragra_${GITHUB_REF_NAME}_debug" \
+            "$stage_dir/${{ matrix.architecture }}/"
           tar -czf "$stage_dir.tar.gz" "$stage_dir"
       - name: Upload macOS executables
         uses: actions/upload-artifact@v7
