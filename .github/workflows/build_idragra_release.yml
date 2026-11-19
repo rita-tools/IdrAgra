@@ -11,16 +11,75 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v7
-      - name: Build release and debug executables
-        shell: pwsh
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up MSYS2 MinGW64 toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          suppress-deprecation-warnings: msystem-mingw64
+          install: >-
+            git
+            make
+            mingw-w64-x86_64-gcc-fortran
+
+      # Useful to check that the toolchain used for remote compilation is the same as the local one
+      - name: Show toolchain
+        shell: msys2 {0}
         run: |
-          New-Item -ItemType Directory -Force -Path release, obj | Out-Null
+          gfortran --version
+          pacman -Q mingw-w64-x86_64-gcc-fortran
+
+      - name: Build release executable
+        shell: msys2 {0}
+        run: |
+          set -euxo pipefail
+          mkdir -p release obj
           make cleanall
           make
+
+      #%PS%: around IdrAgra 3.0.1 release, we had a problem in which the exe compiled locally worked,
+      #      but the one compiled through GitHub Actions did not.
+      #      Here, we make sure the latter can run the demo simulation successfully.
+      - name: Test Windows release on demo simulation
+        shell: msys2 {0}
+        run: |
+          set -euxo pipefail
+
+          executable="release/idragra_${GITHUB_REF_NAME}.exe"
+          test -f "$executable"
+
+          rm -rf demo/simout demo/final_condition
+          (
+            cd demo
+            "../$executable" -f idragra_parameters.txt \
+              > IdrAgra_console.log 2>&1
+          )
+
+          grep -q "code version: *${GITHUB_REF_NAME}" \
+            demo/IdrAgra_console.log
+          test -s demo/simout/2021_irr_tot.asc
+          test -s demo/simout/2022_irr_tot.asc
+          test -s demo/final_condition/fc_thetaI.asc
+          test -s demo/final_condition/fc_thetaII.asc
+
+          tail -n 30 demo/IdrAgra_console.log
+
+          # Do not include generated test results in the release package.
+          rm -rf demo/simout demo/final_condition
+          rm -f demo/IdrAgra_console.log
+
+      - name: Build debug executable
+        shell: msys2 {0}
+        run: |
+          set -euxo pipefail
           make cleanobjects
           make debug=1
+
       - name: Package Windows release
         shell: pwsh
         run: |
@@ -32,6 +91,7 @@ jobs:
           Copy-Item Utilities $packageDir/Utilities -Recurse
           Copy-Item demo $packageDir/demo -Recurse
           Compress-Archive -Path $packageDir -DestinationPath $zipPath -Force
+
       - name: Upload Windows package
         uses: actions/upload-artifact@v7
         with:
