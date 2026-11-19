@@ -1,22 +1,27 @@
 # version string for the header: use an exact tag when present, otherwise the commit string
 VERSION := $(shell git describe --tags --exact-match HEAD 2>/dev/null || git rev-parse --short HEAD)
-CURRENTDATE := $(shell date --iso=seconds)
+CURRENTDATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LOG_FILE := $(shell git log --format=reference > ./release/git_idragra.log)
 
-# Windows OS variables & settings
+# OS variables & settings
 DEL = rm
 CP = cp
-EXE = .exe
-WIN = 1
+
+ifeq ($(OS),Windows_NT) # Windows
+   EXE = .exe
+   WIN = 1
+   STATIC_FLAG = -static
+else
+   EXE =
+   WIN = 0
+   ifeq ($(shell uname -s),Darwin) # macOS
+      STATIC_FLAG = -static-libgfortran -static-libgcc -static-libquadmath
+   else # Others (e.g. Linux)
+      STATIC_FLAG =
+   endif
+endif
 
 # Compiler settings
-# -cpp: activates compiler pre processing
-# -DGIT_VERSION: sets the macro GIT_VERSION in the code (actually used only in cli_main.f90)
-# -g: enables debug with breakpoints 
-
-MINGW64_BINDIR ?= /mingw64/bin
-export PATH := $(MINGW64_BINDIR):$(PATH)
-
 CC = gfortran
 CPP = gfortran -cpp
 
@@ -26,17 +31,20 @@ CPP = gfortran -cpp
 #   make debug=1 -> debug build
 debug ?= 0
 
+# Uses CPP pre-processing to obtain GIT_VERSION, COMP_DATE and WIN, which are accessed by the fortran code
+CPPFLAGS = -cpp -DGIT_VERSION=\"$(VERSION)\" -DCOMP_DATE=\"$(CURRENTDATE)\" -DWIN=$(WIN)
+
 ifeq ($(debug),1)
-   TYPE := debug
-   GFFLAGS = -cpp -DGIT_VERSION=\"$(VERSION)\" -DCOMP_DATE=\"$(CURRENTDATE)\" -DWIN=$(WIN) -g -Wall -Wconversion -fimplicit-none -fbacktrace -ffree-line-length-0 -fcheck=all,no-array-temps -ffpe-trap=zero,overflow,underflow -finit-real=nan -c
+   SUFFIX := _debug
+   FFLAGS = -ffree-line-length-0 -g -Wall -Wconversion -fimplicit-none -fbacktrace -fcheck=all,no-array-temps -ffpe-trap=zero,overflow,underflow -finit-real=nan
    LDFLAGS = -g
 else
-   TYPE := release
-   GFFLAGS = -cpp -DGIT_VERSION=\"$(VERSION)\" -DCOMP_DATE=\"$(CURRENTDATE)\" -DWIN=$(WIN) -ffast-math -O3 -ffree-line-length-0 -c
+   SUFFIX :=
+   FFLAGS = -ffree-line-length-0 -ffast-math -O3
    LDFLAGS =
 endif
 
-APPNAME = idragra_$(VERSION)_$(TYPE)
+APPNAME = idragra_$(VERSION)$(SUFFIX)
 APPALIAS = idragra_latest
 EXT = .f90
 SRCDIR = src
@@ -57,8 +65,8 @@ FILES = mod_constants mod_date mod_utility mod_parameters mod_grid mod_common mo
 # force removing main.o in order to update program metadata
 $(APPNAME): $(patsubst %, $(OBJDIR)/%.o, $(FILES))
 	$(DEL) -f $(OBJDIR)/cli_main.o
-	$(CC) -o $(OBJDIR)/cli_main.o -J$(OBJDIR) $(GFFLAGS) $(SRCDIR)/cli_main.f90
-	$(CPP) -o $(RELDIR)/$@$(EXE) $^ $(OBJDIR)/cli_main.o $(LDFLAGS) -static
+	$(CC) -o $(OBJDIR)/cli_main.o -J$(OBJDIR) $(CPPFLAGS) $(FFLAGS) -c $(SRCDIR)/cli_main.f90
+	$(CPP) -o $(RELDIR)/$@$(EXE) $^ $(OBJDIR)/cli_main.o $(LDFLAGS) $(STATIC_FLAG)
 	$(CP) $(RELDIR)/$@$(EXE) $(RELDIR)/$(APPALIAS)$(EXE)
 
 # The following sets a function that creates makefile rules
@@ -67,7 +75,7 @@ $(APPNAME): $(patsubst %, $(OBJDIR)/%.o, $(FILES))
 # -J: set path for *.mod
 define make-o-rule
 $(OBJDIR)/$1.o: $(SRCDIR)/$1.f90
-	$(CC) -o $(OBJDIR)/$1.o -J$(OBJDIR) $(GFFLAGS) $(SRCDIR)/$1.f90
+	$(CC) -o $(OBJDIR)/$1.o -J$(OBJDIR) $(CPPFLAGS) $(FFLAGS) -c $(SRCDIR)/$1.f90
 all: $1.o
 endef
 
@@ -89,7 +97,7 @@ cleanobjects:
 
 .PHONY: cleanall
 cleanall: cleanobjects
-	$(DEL) -f $(wildcard ./$(RELDIR)/*.exe)
+	$(DEL) -f $(wildcard ./$(RELDIR)/idragra_*)
 
 .PHONY: cleanmain
 cleanmain:

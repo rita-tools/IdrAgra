@@ -1,4 +1,4 @@
-name: Makefile CI
+name: Build IdrAgra release
 
 on:
   push:
@@ -6,63 +6,227 @@ on:
       - "v*"
 
 permissions:
-  contents: write
-
-# on: workflow_dispatch
+  contents: read
 
 jobs:
-  build:
-
+  build-windows:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Check out source
+        uses: actions/checkout@v7
 
-      - name: Build
-        shell: pwsh
+      - name: Set up MSYS2 MinGW64 toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          suppress-deprecation-warnings: msystem-mingw64
+          install: >-
+            git
+            make
+            mingw-w64-x86_64-gcc-fortran
+
+      # Useful to check that the toolchain used for remote compilation is the same as the local one
+      - name: Show toolchain
+        shell: msys2 {0}
         run: |
-          New-Item -ItemType Directory -Force -Path release, obj | Out-Null
+          gfortran --version
+          pacman -Q mingw-w64-x86_64-gcc-fortran
+
+      - name: Build release executable
+        shell: msys2 {0}
+        run: |
+          set -euxo pipefail
+          mkdir -p release obj
           make cleanall
           make
+
+      #%PS%: around IdrAgra 3.0.1 release, we had a problem in which the exe compiled locally worked,
+      #      but the one compiled through GitHub Actions did not.
+      #      Here, we make sure the latter can run the demo simulation successfully.
+      - name: Test Windows release on demo simulation
+        shell: msys2 {0}
+        run: |
+          set -euxo pipefail
+
+          executable="release/idragra_${GITHUB_REF_NAME}.exe"
+          test -f "$executable"
+
+          rm -rf demo/simout demo/final_condition
+          (
+            cd demo
+            "../$executable" -f idragra_parameters.txt \
+              > IdrAgra_console.log 2>&1
+          )
+
+          grep -q "code version: *${GITHUB_REF_NAME}" \
+            demo/IdrAgra_console.log
+          test -s demo/simout/2021_irr_tot.asc
+          test -s demo/simout/2022_irr_tot.asc
+          test -s demo/final_condition/fc_thetaI.asc
+          test -s demo/final_condition/fc_thetaII.asc
+
+          tail -n 30 demo/IdrAgra_console.log
+
+          # Do not include generated test results in the release package.
+          rm -rf demo/simout demo/final_condition
+          rm -f demo/IdrAgra_console.log
+
+      - name: Build debug executable
+        shell: msys2 {0}
+        run: |
+          set -euxo pipefail
           make cleanobjects
           make debug=1
 
-      - name: Package release
+      - name: Package Windows release
         shell: pwsh
         run: |
-          $packageDir = "release/IdrAgra_${{ github.ref_name }}"
+          $packageDir = "release/IdrAgra_${{ github.ref_name }}_Windows"
           $zipPath = "$packageDir.zip"
-
           New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
-          Copy-Item release/*_release.exe $packageDir/
-          Copy-Item release/*_debug.exe $packageDir/
+          Copy-Item "release/idragra_${{ github.ref_name }}.exe" $packageDir/
+          Copy-Item "release/idragra_${{ github.ref_name }}_debug.exe" $packageDir/
           Copy-Item Utilities $packageDir/Utilities -Recurse
           Copy-Item demo $packageDir/demo -Recurse
-          Compress-Archive -Path "$packageDir/*" -DestinationPath $zipPath -Force
+          Compress-Archive -Path $packageDir -DestinationPath $zipPath -Force
 
-      - name: Create or update GitHub release
-        shell: pwsh
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-package
+          path: release/IdrAgra_${{ github.ref_name }}_Windows.zip
+          if-no-files-found: error
+
+  build-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+          - runner: macos-15-intel
+            architecture: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Show toolchain
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          $version = $tag.TrimStart('v')
+          uname -a
+          gfortran-14 --version
+      - name: Build release and debug executables
+        run: |
+          mkdir -p release obj
+          make cleanall
+          make CC=gfortran-14 \
+            'CPP=gfortran-14 -cpp'
+          make cleanobjects
+          make debug=1 CC=gfortran-14 \
+            'CPP=gfortran-14 -cpp'
+      - name: Inspect executables
+        run: |
+          file "release/idragra_${GITHUB_REF_NAME}" \
+            "release/idragra_${GITHUB_REF_NAME}_debug"
+          otool -L "release/idragra_${GITHUB_REF_NAME}"
+          otool -L "release/idragra_${GITHUB_REF_NAME}_debug"
+      - name: Test demo simulation
+        shell: bash
+        run: |
+          executable="release/idragra_${GITHUB_REF_NAME}"
+          test -x "$executable"
+          rm -rf demo/simout demo/final_condition
+          (
+            cd demo
+            "../$executable" -f idragra_parameters.txt \
+              > IdrAgra_console.log 2>&1
+          )
+          grep -q "code version: *${GITHUB_REF_NAME}" demo/IdrAgra_console.log
+          test -s demo/simout/2021_irr_tot.asc
+          test -s demo/simout/2022_irr_tot.asc
+          test -s demo/final_condition/fc_thetaI.asc
+          test -s demo/final_condition/fc_thetaII.asc
+          tail -n 30 demo/IdrAgra_console.log
+      - name: Stage macOS executables
+        shell: bash
+        run: |
+          stage_dir="macos-${{ matrix.architecture }}"
+          mkdir -p "$stage_dir/${{ matrix.architecture }}"
+          cp "release/idragra_${GITHUB_REF_NAME}" \
+            "release/idragra_${GITHUB_REF_NAME}_debug" \
+            "$stage_dir/${{ matrix.architecture }}/"
+          tar -czf "$stage_dir.tar.gz" "$stage_dir"
+      - name: Upload macOS executables
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-${{ matrix.architecture }}
+          path: macos-${{ matrix.architecture }}.tar.gz
+          if-no-files-found: error
 
-          gh release view $tag *> $null
-          $releaseExists = $LASTEXITCODE -eq 0
+  package-macos:
+    needs: build-macos
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download macOS executables
+        uses: actions/download-artifact@v8
+        with:
+          pattern: macos-*
+          path: macos-artifacts
+          merge-multiple: true
+      - name: Package combined macOS release
+        shell: bash
+        run: |
+          package_dir="release/IdrAgra_${GITHUB_REF_NAME}_macOS"
+          mkdir -p "$package_dir"
+          for archive in macos-artifacts/*.tar.gz; do
+            tar -xzf "$archive" -C "$package_dir" --strip-components=1
+          done
+          cp -R Utilities "$package_dir/Utilities"
+          cp -R demo "$package_dir/demo"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$package_dir" "$package_dir.zip"
+      - name: Upload macOS package
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-package
+          path: release/IdrAgra_${{ github.ref_name }}_macOS.zip
+          if-no-files-found: error
 
-          if ($releaseExists) {
-            gh release upload $tag `
-              release/*_release.exe `
-              release/*_debug.exe `
-              release/*.zip `
-              --clobber
-          }
-          else {
-            gh release create $tag `
-              release/*_release.exe `
-              release/*_debug.exe `
-              release/*.zip `
-              --title "IdrAgra $version" `
-              --generate-notes
-          }
+  release:
+    if: github.event_name == 'push'
+    needs: [build-windows, package-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: '*-package'
+          path: release
+          merge-multiple: true
+      - name: Create or update GitHub release
+        shell: bash
+        run: |
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          windows_zip="release/IdrAgra_${tag}_Windows.zip"
+          macos_zip="release/IdrAgra_${tag}_macOS.zip"
+          test -s "$windows_zip"
+          test -s "$macos_zip"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            while IFS= read -r asset; do
+              case "$asset" in
+                "$(basename "$windows_zip")"|"$(basename "$macos_zip")") ;;
+                *) gh release delete-asset "$tag" "$asset" --yes ;;
+              esac
+            done < <(gh release view "$tag" --json assets --jq '.assets[].name')
+            gh release upload "$tag" "$windows_zip" "$macos_zip" --clobber
+          else
+            gh release create "$tag" "$windows_zip" "$macos_zip" \
+              --title "IdrAgra $version" --generate-notes
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
