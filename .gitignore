@@ -1,6 +1,5 @@
 .vscode/launch.json
-obj/*.mod
-obj/*.o
+obj/
 assets
 release
 demo/simout/**
