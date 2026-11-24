@@ -232,13 +232,14 @@ stop
 end subroutine show_help
 
 subroutine print_header()
-! use makefile macros to set version and compilation timestamp
+! Relies on makefile macros to set version and compilation timestamp
+print *, ''
 print *, '============== IDRAGRA - IDRologia AGRAria ================'
 print *, 'contact: claudio.gandolfi@unimi.it'
-print *, 'code version: ',GIT_VERSION
-print *, 'compiled on: ',COMP_DATE
-print *, 'source available on https://github.com/rita-tools/IdrAgra_v2'
-print *, '============================================================'
+print *, 'code version: ', GIT_VERSION
+print *, 'compiled on: ', COMP_DATE
+print *, 'source available on https://github.com/rita-tools/IdrAgra'
+print *, '==========================================================='
 print *, ''
 end subroutine print_header
 
