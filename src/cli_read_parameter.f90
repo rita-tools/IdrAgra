@@ -619,19 +619,11 @@ end subroutine read_irr_method
 subroutine read_all_irr_methods(xml, debug)
     logical, intent(in) :: debug
     type(parameters), intent(inout) :: xml
-    integer :: free_unit
-    integer :: i
+    integer :: free_unit, i, p, ios, line, tablestart
     character(len=200) :: irr_method_fn
-    ! Input related variables used in parsing loop
     character(len=300) :: comment,buffer, label
-    integer :: p
-    integer :: ios          ! state variable (0 = ok)
-    integer :: line, tablestart
 
-    line = 0; tablestart = 0
-    ios = 0
-    print*,'irr_met_path: ',     xml%sim%irr_met_path
-    print*,'irr_met_filename: ', xml%sim%irr_met_list_fn
+    line = 0; tablestart = 0; ios = 0
 
     open(newunit=free_unit, file=trim(xml%sim%irr_met_path)//trim(xml%sim%irr_met_list_fn), action="read")
     line = 0; tablestart = 0
